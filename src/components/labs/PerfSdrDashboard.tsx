@@ -135,7 +135,7 @@ export const PerfSdrDashboard: React.FC<{ data: DashData; demo?: boolean }> = ({
   const totalLbCusto = m.leadbrokerBySdr.reduce((a, x) => a + x.custo, 0);
 
   return (
-    <div className="flex-1 min-h-screen overflow-y-auto bg-[var(--color-v4-bg)] p-6">
+    <div className="flex-1 overflow-y-auto bg-[var(--color-v4-bg)] p-6">
       {/* header */}
       <div className="flex items-center gap-2 mb-1">
         <Users size={20} className="text-[var(--color-v4-red)]" />

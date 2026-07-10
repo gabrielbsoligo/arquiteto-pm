@@ -262,6 +262,7 @@ const MainApp: React.FC = () => {
       case "playbook": return <PlaybookView />;
       case "roleta_historico": return <RoletaHistoricoView />;
       case "perf_sdr": return <PerfSdrView />;
+      case "perf_visual": return <LabPerfSdrRoute />;
       case "call_quality": return <CallQualityView />;
       case "geral": return <GeralView />;
       case "equipe": return <EquipeView />;
@@ -295,7 +296,9 @@ export default function App() {
     return (
       <AppProvider>
         <Toaster position="top-right" />
-        <LabPerfSdrRoute demo={params.get('demo') === '1'} />
+        <div className="flex h-screen w-full bg-[var(--color-v4-bg)]">
+          <LabPerfSdrRoute demo={params.get('demo') === '1'} />
+        </div>
       </AppProvider>
     );
   }
