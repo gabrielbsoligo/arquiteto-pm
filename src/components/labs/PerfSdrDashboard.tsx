@@ -391,45 +391,50 @@ export const PerfSdrDashboard: React.FC<{ data: DashData; demo?: boolean }> = ({
   );
 };
 
-// gráfico de FUNIL de verdade (trapézios afunilando), estilo calculadora.
+// gráfico de FUNIL com gradiente: rótulo à esquerda, valor no funil, conversão à direita.
 const FunnelChart: React.FC<{ stages: FunnelStage[]; noshow: { value: number; pct: number | null; clients: ClientRef[] } }> = ({ stages, noshow }) => {
   const [hover, setHover] = useState<number | null>(null);
-  const W = 660, BAND = 66, GAP = 8;
-  const H = stages.length * BAND;
+  const W = 560, BAND = 76, GAP = 9, H = stages.length * BAND;
   const maxV = Math.max(1, stages[0].value);
-  const half = (v: number) => (Math.max(0.03, v / maxV) * W) / 2; // sliver mínimo p/ etapa não sumir
-  const cx = W / 2;
+  const cx = 300, HALF = 130;                 // funil ocupa 170..430; rótulo à esquerda, % à direita
+  const half = (v: number) => Math.max(4, (v / maxV) * HALF);
+  const midY = (i: number) => i * BAND + (BAND - GAP) / 2;
   return (
     <div className="relative">
-      <svg viewBox={`0 0 ${W} ${H}`} width="100%" preserveAspectRatio="xMidYMid meet" style={{ display: "block" }}>
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" preserveAspectRatio="xMidYMid meet" style={{ display: "block", overflow: "visible" }}>
+        <defs>
+          <linearGradient id="fnlGrad" x1="0" y1="0" x2="0" y2={H} gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stopColor={PAL.redSoft} />
+            <stop offset="55%" stopColor={PAL.red} />
+            <stop offset="100%" stopColor={PAL.redDeep} />
+          </linearGradient>
+        </defs>
         {stages.map((s, i) => {
           const next = stages[i + 1];
-          const topH = half(s.value);
-          const botH = half(next ? next.value : s.value * 0.82);
-          const y = i * BAND, y2 = y + BAND - GAP;
-          const dark = s.color === PAL.white;
+          const t = half(s.value), b = half(next ? next.value : s.value * 0.7);
+          const y = i * BAND, y2 = y + BAND - GAP, my = midY(i);
           const dim = hover !== null && hover !== i;
           return (
-            <g key={s.key} onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)}>
-              <polygon points={`${cx - topH},${y} ${cx + topH},${y} ${cx + botH},${y2} ${cx - botH},${y2}`}
-                fill={s.color} opacity={dim ? 0.5 : 1} style={{ transition: "opacity .15s" }} />
-              <text x={cx} y={y + (BAND - GAP) / 2 - 3} textAnchor="middle" fontSize="13" fontWeight="700" fill={dark ? "#000" : "#fff"}>{s.label}</text>
-              <text x={cx} y={y + (BAND - GAP) / 2 + 15} textAnchor="middle" fontSize="16" fontWeight="800" fill={dark ? "#000" : "#fff"}>{s.value}</text>
+            <g key={s.key} onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)} opacity={dim ? 0.45 : 1} style={{ transition: "opacity .15s" }}>
+              <polygon points={`${cx - t},${y} ${cx + t},${y} ${cx + b},${y2} ${cx - b},${y2}`} fill="url(#fnlGrad)" />
+              <text x={140} y={my} textAnchor="end" dominantBaseline="middle" fontSize="13.5" fontWeight="600" fill={PAL.white}>{s.label}</text>
+              <text x={cx} y={my} textAnchor="middle" dominantBaseline="middle" fontSize="19" fontWeight="800" fill="#fff"
+                stroke="#0a0a0a" strokeWidth="0.7" style={{ paintOrder: "stroke" }}>{s.value}</text>
               {s.convFromPrev != null && (
-                <text x={W - 2} y={y + 18} textAnchor="end" fontSize="12" fontWeight="700" fill={PAL.muted}>▲ {s.convFromPrev}%</text>
+                <text x={W} y={my} textAnchor="end" dominantBaseline="middle" fontSize="13" fontWeight="700" fill={PAL.muted}>▲ {s.convFromPrev}%</text>
               )}
             </g>
           );
         })}
       </svg>
       {hover != null && stages[hover].clients.length > 0 && (
-        <div className="absolute z-20 pointer-events-none" style={{ ...tipBox, left: "58%", top: hover * BAND }}>
+        <div className="absolute z-20 pointer-events-none" style={{ ...tipBox, left: "60%", top: `${(hover / stages.length) * 100}%` }}>
           <div className="text-white font-semibold text-[11px]">{stages[hover].label} · {stages[hover].value} clientes</div>
           <ClientList clients={stages[hover].clients} max={10} />
         </div>
       )}
       {/* No Show — vazamento das agendadas */}
-      <div className="mt-3 flex items-center gap-2 text-[12px] border-t border-[var(--color-v4-border)] pt-2.5">
+      <div className="mt-4 flex items-center gap-2 text-[12px] border-t border-[var(--color-v4-border)] pt-2.5">
         <UserX size={13} className="text-[var(--color-v4-text-muted)]" />
         <span className="text-[var(--color-v4-text-muted)]">No Show</span>
         <span className="px-2 py-0.5 rounded font-bold text-white" style={{ background: PAL.grayDark }}>{noshow.value}</span>

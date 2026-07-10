@@ -89,46 +89,61 @@ export function computeMetrics(
 ): Metrics {
   const { members, leads, deals, reunioes, ligacoes } = data;
   const sdrsAll = members.filter((m) => m.role === "sdr" && m.active);
-  const allowed = f.sdrIds && f.sdrIds.length ? new Set(f.sdrIds) : new Set(sdrsAll.map((s) => s.id));
+  const filtering = !!(f.sdrIds && f.sdrIds.length);
+  const allowed = filtering ? new Set(f.sdrIds!) : new Set(sdrsAll.map((s) => s.id));
   const leadById = new Map(leads.map((l) => [l.id, l]));
   const nameById = new Map(members.map((m) => [m.id, m.name]));
-  const canalOfDeal = (d: Deal) => normCanal(d.lead?.canal || (d.lead_id ? leadById.get(d.lead_id)?.canal : undefined) || d.origem);
+  // canal fiel ao get_perf_funil: reunião usa r.canal → lead.canal; deal usa origem → lead.canal.
+  const canalOfReu = (r: Reuniao) => normCanal(r.canal && r.canal.trim() ? r.canal : (r.lead_id ? leadById.get(r.lead_id)?.canal : undefined));
+  const canalOfDeal = (d: Deal) => normCanal(d.origem && d.origem.trim() ? d.origem : (d.lead?.canal || (d.lead_id ? leadById.get(d.lead_id)?.canal : undefined)));
+  const dealDay = (d: Deal) => day(d.data_fechamento || d.data_call || d.created_at);
+
+  // classificação idêntica à tela de Reuniões / RPC get_perf_funil:
+  //   realizada = realizada && show===true   ·   no-show = realizada && !show   ·   agendada (pendente) = !realizada
+  const isReal = (r: Reuniao) => r.realizada === true && r.show === true;
+  const isNoShow = (r: Reuniao) => r.realizada === true && !r.show;
+  const okSdr = (id?: string | null) => !!id && allowed.has(id);
+  // reuniões da janela com SDR (base "agendadas" = COUNT(*), igual ao RPC)
+  const reusInRange = reunioes.filter((r) => okSdr(r.sdr_id) && inRange(day(r.data_reuniao), f.from, f.to));
+  // deals fechados (contrato assinado) na janela — fiéis à aba Contratos/pipeline
+  const closed = deals.filter((d) => d.status === "contrato_assinado" && inRange(dealDay(d), f.from, f.to) && (!filtering || okSdr(d.sdr_id)));
+  const reuCli = (arr: Reuniao[]) => arr.map((r) => ({ empresa: r.empresa || "—", sdr: r.sdr_id ? nameById.get(r.sdr_id) : undefined, canal: canalOfReu(r) }));
+  const dealCli = (arr: Deal[]) => arr.map((d) => ({ empresa: d.empresa || "—", sdr: d.sdr_id ? nameById.get(d.sdr_id) : undefined, canal: canalOfDeal(d), valor: dealValor(d) }));
 
   // ---------- por SDR ----------
   const sdrs: SdrRow[] = sdrsAll
     .filter((s) => allowed.has(s.id))
     .map((s, i) => {
       const ligs = ligacoes.filter((l) => l.member_id === s.id && inRange(day(l.started_at), f.from, f.to));
-      const reus = reunioes.filter((r) => r.sdr_id === s.id && inRange(day(r.data_reuniao), f.from, f.to));
-      const reAg = reus;
-      const reRe = reus.filter((r) => r.realizada === true);
-      const reNo = reus.filter((r) => r.show === false);
-      const fes = deals.filter((d) => d.sdr_id === s.id && d.status === "contrato_assinado" && inRange(day(d.data_fechamento), f.from, f.to));
-      const cli = (arr: any[], withCanal = false) =>
-        arr.map((x) => ({ empresa: x.empresa || "—", sdr: s.name, canal: withCanal ? normCanal(x.canal) : undefined }));
+      const reus = reusInRange.filter((r) => r.sdr_id === s.id);
+      const reRe = reus.filter(isReal);
+      const reNo = reus.filter(isNoShow);
+      const fes = closed.filter((d) => d.sdr_id === s.id);
       return {
         id: s.id, name: s.name, first: s.name.split(" ")[0], color: seriesColor(i),
         ligacoes: ligs.length,
         conexoes: ligs.filter((l) => l.atendida).length,
-        agendadas: reAg.length, realizadas: reRe.length, noshow: reNo.length, fechadas: fes.length,
-        clientsAg: cli(reAg, true), clientsRe: cli(reRe, true), clientsNo: cli(reNo, true),
-        clientsFe: fes.map((d) => ({ empresa: d.empresa || "—", sdr: s.name, canal: canalOfDeal(d), valor: dealValor(d) })),
+        agendadas: reus.length, realizadas: reRe.length, noshow: reNo.length, fechadas: fes.length,
+        clientsAg: reuCli(reus), clientsRe: reuCli(reRe), clientsNo: reuCli(reNo),
+        clientsFe: dealCli(fes),
       };
     });
 
-  const sum = (k: keyof SdrRow) => sdrs.reduce((a, r) => a + (Number(r[k]) || 0), 0);
   const totals = {
-    ligacoes: sum("ligacoes"), conexoes: sum("conexoes"), agendadas: sum("agendadas"),
-    realizadas: sum("realizadas"), fechadas: sum("fechadas"), noshow: sum("noshow"),
+    ligacoes: sdrs.reduce((a, s) => a + s.ligacoes, 0),
+    conexoes: sdrs.reduce((a, s) => a + s.conexoes, 0),
+    agendadas: reusInRange.length,
+    realizadas: reusInRange.filter(isReal).length,
+    noshow: reusInRange.filter(isNoShow).length,
+    fechadas: closed.length,
   };
 
-  const gather = (key: "clientsAg" | "clientsRe" | "clientsNo" | "clientsFe") => sdrs.flatMap((s) => s[key]);
   const funnel: FunnelStage[] = [
     { key: "ligacoes", label: "Ligações", value: totals.ligacoes, clients: [] },
     { key: "conexoes", label: "Conexões", value: totals.conexoes, clients: [] },
-    { key: "agendadas", label: "Agendadas", value: totals.agendadas, clients: gather("clientsAg") },
-    { key: "realizadas", label: "Realizadas", value: totals.realizadas, clients: gather("clientsRe") },
-    { key: "fechadas", label: "Fechadas", value: totals.fechadas, clients: gather("clientsFe") },
+    { key: "agendadas", label: "Agendadas", value: totals.agendadas, clients: reuCli(reusInRange) },
+    { key: "realizadas", label: "Realizadas", value: totals.realizadas, clients: reuCli(reusInRange.filter(isReal)) },
+    { key: "fechadas", label: "Fechadas", value: totals.fechadas, clients: dealCli(closed) },
   ].map((s, i, arr) => ({
     ...s,
     color: FUNNEL_COLORS[s.key],
@@ -150,7 +165,7 @@ export function computeMetrics(
   const lbBySdr: Record<string, { name: string; qtd: number; custo: number; clients: ClientRef[] }> = {};
   for (const l of leads) {
     if (!inRange(day(l.data_cadastro || l.created_at), f.from, f.to)) continue;
-    if (l.sdr_id && !allowed.has(l.sdr_id)) continue;
+    if (filtering && !okSdr(l.sdr_id)) continue;
     const c = normCanal(l.canal);
     ch(c).leads++;
     if (c === "leadbroker") {
@@ -162,19 +177,15 @@ export function computeMetrics(
       ch(c).custo += Number(l.valor_lead) || 0;
     }
   }
-  for (const r of reunioes) {
-    if (!inRange(day(r.data_reuniao), f.from, f.to)) continue;
-    if (r.sdr_id && !allowed.has(r.sdr_id)) continue;
-    const c = normCanal(r.canal);
+  for (const r of reusInRange) {
+    const c = canalOfReu(r);
     const row = ch(c);
     row.agendadas++;
     row.clientsAg.push({ empresa: r.empresa || "—", sdr: r.sdr_id ? nameById.get(r.sdr_id) : undefined, canal: c });
-    if (r.realizada === true) row.realizadas++;
-    if (r.show === false) row.noshow++;
+    if (isReal(r)) row.realizadas++;
+    if (isNoShow(r)) row.noshow++;
   }
-  for (const d of deals) {
-    if (d.status !== "contrato_assinado" || !inRange(day(d.data_fechamento), f.from, f.to)) continue;
-    if (d.sdr_id && !allowed.has(d.sdr_id)) continue;
+  for (const d of closed) {
     const c = canalOfDeal(d);
     const row = ch(c);
     row.fechadas++;
@@ -185,7 +196,7 @@ export function computeMetrics(
     .sort((a, b) => b.agendadas + b.fechadas - (a.agendadas + a.fechadas));
 
   const leadbrokerBySdr = Object.values(lbBySdr).sort((a, b) => b.qtd - a.qtd);
-  const fechadas = sdrs.flatMap((s) => s.clientsFe).sort((a, b) => (b.valor || 0) - (a.valor || 0));
+  const fechadas = dealCli(closed).sort((a, b) => (b.valor || 0) - (a.valor || 0));
 
   // ---------- ligações por hora (pizza) ----------
   const hourMap = new Map<number, { total: number; bySdr: Record<string, number> }>();
@@ -244,16 +255,18 @@ export function makeDemoData() {
   for (let i = 0; i < 70; i++) {
     const sdr = pick(members); const canal = pick(canais); const emp = pick(empresas);
     const dr = dstr(rnd(30));
-    const realizada = Math.random() < 0.62;
-    const noShow = !realizada && Math.random() < 0.5;
+    // 3 estados fiéis ao modelo: realizada (realizada&&show), no-show (realizada&&!show), pendente (!realizada)
+    const roll = Math.random();
+    const realizada = roll < 0.72;             // 72% já foram confirmadas (realizada=true)
+    const show = realizada ? roll < 0.55 : false; // dessas, compareceram; senão no-show. pendente fica !realizada
     reunioes.push({ id: `r${id++}`, sdr_id: sdr.id, canal, empresa: emp, tipo: "primeira_call",
-      data_reuniao: `${dr}T14:00:00`, realizada, show: noShow ? false : realizada, created_at: dr });
-    if (realizada && Math.random() < 0.4) {
+      data_reuniao: `${dr}T14:00:00`, realizada, show, created_at: dr });
+    if (realizada && show && Math.random() < 0.45) {
       const df = dr;
       deals.push({ id: `d${id++}`, empresa: emp, sdr_id: sdr.id, status: "contrato_assinado",
         origem: canal, valor_mrr: 3000 + rnd(12) * 500, valor_ot: rnd(8) * 2000,
         valor_escopo: 0, valor_recorrente: 0, produtos_ot: [], produtos_mrr: [],
-        data_fechamento: df, created_at: df, updated_at: df });
+        data_fechamento: df, data_call: df, created_at: df, updated_at: df });
     }
   }
   for (let i = 0; i < 800; i++) {
