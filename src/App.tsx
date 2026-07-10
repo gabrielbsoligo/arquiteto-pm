@@ -25,6 +25,7 @@ import { GeralView } from "./components/GeralView";
 import { AuditPanel } from "./components/AuditPanel";
 import { BriefingApresentacao } from "./components/BriefingApresentacao";
 import { TVMode } from "./components/TVMode";
+import { LabPerfSdrRoute } from "./components/labs/PerfSdrDashboard";
 import { RoletaAssignModal } from "./components/RoletaAssignModal";
 import type { Lead } from "./types";
 import { supabase } from "./lib/supabase";
@@ -286,6 +287,18 @@ export default function App() {
   const auditPanelSession = params.get('audit_panel') === '1' ? params.get('session') : null;
   const briefingId = params.get('briefing');
   const tvMode = params.get('tv') === '1';
+  const labsView = params.get('labs');
+
+  // Rota Labs (read-only): /?labs=perf → dashboard visual de performance do SDR.
+  // /?labs=perf&demo=1 renderiza com dados mock (sem login), só pra ver o layout.
+  if (labsView === 'perf') {
+    return (
+      <AppProvider>
+        <Toaster position="top-right" />
+        <LabPerfSdrRoute demo={params.get('demo') === '1'} />
+      </AppProvider>
+    );
+  }
 
   // Rota pública /?briefing=<uuid> → página de apresentação (sem login, sem AppProvider)
   if (briefingId) {
