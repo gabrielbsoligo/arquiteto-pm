@@ -1,14 +1,14 @@
 import React, { useMemo, useState } from "react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell,
-  PieChart, Pie,
+  PieChart, Pie, LabelList,
 } from "recharts";
 import { Phone, Link2, CalendarClock, CheckCircle2, Trophy, UserX, Users, Filter, Radio, ShoppingCart } from "lucide-react";
 import { useAppStore } from "../../store";
 import { LoginView } from "../LoginView";
 import {
   computeMetrics, makeDemoData, PAL, seriesColor, CANAL_LABEL,
-  type Filters, type ClientRef, type Metrics,
+  type Filters, type ClientRef, type Metrics, type FunnelStage,
 } from "./perfMetrics";
 import type { TeamMember, Lead, Deal, Reuniao, Ligacao4com } from "../../types";
 
@@ -91,20 +91,23 @@ const Section: React.FC<{ title: string; icon?: React.ReactNode; children: React
   </div>
 );
 
-type Preset = "hoje" | "7d" | "30d" | "90d";
+type Preset = "hoje" | "7d" | "30d" | "90d" | "custom";
 
 export const PerfSdrDashboard: React.FC<{ data: DashData; demo?: boolean }> = ({ data, demo }) => {
   const [preset, setPreset] = useState<Preset>("30d");
   const [selSdrs, setSelSdrs] = useState<string[]>([]); // [] = todos
+  const [cFrom, setCFrom] = useState(iso(new Date(Date.now() - 29 * 864e5)));
+  const [cTo, setCTo] = useState(iso(new Date()));
 
   const sdrsAll = useMemo(() => data.members.filter((m) => m.role === "sdr" && m.active), [data.members]);
 
   const [from, to] = useMemo(() => {
     const t = new Date();
     if (preset === "hoje") return [iso(t), iso(t)];
+    if (preset === "custom") return [cFrom <= cTo ? cFrom : cTo, cTo >= cFrom ? cTo : cFrom];
     const back = preset === "7d" ? 6 : preset === "30d" ? 29 : 89;
     return [iso(new Date(Date.now() - back * 864e5)), iso(t)];
-  }, [preset]);
+  }, [preset, cFrom, cTo]);
 
   const filters: Filters = { from, to, sdrIds: selSdrs.length ? selSdrs : null };
   const m: Metrics = useMemo(() => computeMetrics(data, filters), [data, from, to, selSdrs]);
@@ -145,13 +148,22 @@ export const PerfSdrDashboard: React.FC<{ data: DashData; demo?: boolean }> = ({
       <div className="flex flex-wrap items-center gap-3 mb-5">
         <div className="flex items-center gap-1.5 text-[var(--color-v4-text-muted)] text-xs"><Filter size={13} /></div>
         <div className="flex bg-[var(--color-v4-surface)] rounded-lg p-0.5">
-          {(["hoje", "7d", "30d", "90d"] as Preset[]).map((p) => (
+          {(["hoje", "7d", "30d", "90d", "custom"] as Preset[]).map((p) => (
             <button key={p} onClick={() => setPreset(p)}
               className={`px-3 py-1.5 rounded-md text-xs font-medium ${preset === p ? "bg-[var(--color-v4-red)] text-white" : "text-[var(--color-v4-text-muted)]"}`}>
-              {p === "hoje" ? "Hoje" : p === "7d" ? "7 dias" : p === "30d" ? "30 dias" : "90 dias"}
+              {p === "hoje" ? "Hoje" : p === "7d" ? "7 dias" : p === "30d" ? "30 dias" : p === "90d" ? "90 dias" : "Custom"}
             </button>
           ))}
         </div>
+        {preset === "custom" && (
+          <span className="flex items-center gap-1.5 text-xs text-[var(--color-v4-text-muted)]">
+            <input type="date" value={cFrom} max={cTo} onChange={(e) => setCFrom(e.target.value)}
+              className="bg-[var(--color-v4-surface)] border border-[var(--color-v4-border)] rounded px-2 py-1 text-white" />
+            até
+            <input type="date" value={cTo} min={cFrom} max={iso(new Date())} onChange={(e) => setCTo(e.target.value)}
+              className="bg-[var(--color-v4-surface)] border border-[var(--color-v4-border)] rounded px-2 py-1 text-white" />
+          </span>
+        )}
         <div className="flex flex-wrap gap-1.5">
           {sdrsAll.map((s, i) => {
             const on = selSdrs.includes(s.id);
@@ -185,16 +197,8 @@ export const PerfSdrDashboard: React.FC<{ data: DashData; demo?: boolean }> = ({
       {/* FUNIL ToFu + conversões */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
         <div className={`${card} lg:col-span-2`}>
-          <div className="text-[11px] text-[var(--color-v4-text-muted)] mb-3">Funil ToFu (topo → fundo) — largura proporcional; passe o mouse pra ver clientes</div>
-          <div className="space-y-2">
-            {m.funnel.map((st, i) => {
-              const max = m.funnel[0].value || 1;
-              return (
-                <FunnelRow key={st.key} label={st.label} value={st.value} color={st.color}
-                  widthPct={Math.max(4, (100 * st.value) / max)} conv={st.convFromPrev} clients={st.clients} />
-              );
-            })}
-          </div>
+          <div className="text-[11px] text-[var(--color-v4-text-muted)] mb-3">Funil ToFu (topo → fundo) — % = conversão da etapa anterior; passe o mouse pra ver clientes</div>
+          <FunnelChart stages={m.funnel} noshow={{ value: m.totals.noshow, pct: m.convRates[4].pct, clients: m.sdrs.flatMap((s) => s.clientsNo) }} />
         </div>
         <div className={card}>
           <div className="text-[11px] text-[var(--color-v4-text-muted)] mb-3">Conversão etapa → etapa</div>
@@ -293,20 +297,20 @@ export const PerfSdrDashboard: React.FC<{ data: DashData; demo?: boolean }> = ({
           {m.channels.length === 0 ? (
             <div className="text-xs text-[var(--color-v4-text-muted)] py-8 text-center">Sem dados por canal no período.</div>
           ) : (
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={m.channels.map((c) => ({
+            <ResponsiveContainer width="100%" height={Math.max(220, m.channels.length * 74 + 48)}>
+              <BarChart layout="vertical" barCategoryGap="22%" data={m.channels.map((c) => ({
                 canal: c.label, Agendadas: c.agendadas, Realizadas: c.realizadas, "No Show": c.noshow, Fechadas: c.fechadas,
                 _cli_Agendadas: c.clientsAg, _cli_Fechadas: c.clientsFe, _cli_Realizadas: [], "_cli_No Show": [],
-              }))} margin={{ top: 8, right: 8, left: -18, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke={PAL.grid} />
-                <XAxis dataKey="canal" tick={{ fontSize: 11, fill: PAL.muted }} />
-                <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: PAL.muted }} />
+              }))} margin={{ top: 8, right: 30, left: 8, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke={PAL.grid} horizontal={false} />
+                <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11, fill: PAL.muted }} />
+                <YAxis type="category" dataKey="canal" width={96} tick={{ fontSize: 12, fill: "#fff" }} />
                 <Tooltip cursor={{ fill: "#ffffff10" }} content={<BarTip />} />
                 <Legend wrapperStyle={{ fontSize: 11 }} />
-                <Bar dataKey="Agendadas" fill={PAL.redHover} radius={[3, 3, 0, 0]} />
-                <Bar dataKey="Realizadas" fill={PAL.red} radius={[3, 3, 0, 0]} />
-                <Bar dataKey="Fechadas" fill={PAL.white} radius={[3, 3, 0, 0]} />
-                <Bar dataKey="No Show" fill={PAL.grayDark} radius={[3, 3, 0, 0]} />
+                <Bar dataKey="Agendadas" fill={PAL.redHover} radius={[0, 3, 3, 0]}><LabelList dataKey="Agendadas" position="right" fill={PAL.muted} fontSize={10} /></Bar>
+                <Bar dataKey="Realizadas" fill={PAL.red} radius={[0, 3, 3, 0]}><LabelList dataKey="Realizadas" position="right" fill={PAL.muted} fontSize={10} /></Bar>
+                <Bar dataKey="Fechadas" fill={PAL.white} radius={[0, 3, 3, 0]}><LabelList dataKey="Fechadas" position="right" fill={PAL.muted} fontSize={10} /></Bar>
+                <Bar dataKey="No Show" fill={PAL.grayDark} radius={[0, 3, 3, 0]}><LabelList dataKey="No Show" position="right" fill={PAL.muted} fontSize={10} /></Bar>
               </BarChart>
             </ResponsiveContainer>
           )}
@@ -387,22 +391,53 @@ export const PerfSdrDashboard: React.FC<{ data: DashData; demo?: boolean }> = ({
   );
 };
 
-// linha do funil com hover de clientes
-const FunnelRow: React.FC<{ label: string; value: number; color: string; widthPct: number; conv: number | null; clients: ClientRef[] }> = ({ label, value, color, widthPct, conv, clients }) => (
-  <div className="group relative flex items-center gap-3">
-    <span className="w-20 text-[11px] text-[var(--color-v4-text-muted)] text-right">{label}</span>
-    <div className="flex-1 h-8 rounded bg-[var(--color-v4-surface)] overflow-hidden">
-      <div className="h-full rounded flex items-center px-2.5 text-sm font-bold" style={{ width: `${widthPct}%`, background: color, color: color === PAL.white ? "#000" : "#fff" }}>{value}</div>
-    </div>
-    <span className="w-12 text-[11px] text-[var(--color-v4-text-muted)] text-right">{conv != null ? `${conv}%` : ""}</span>
-    {clients.length > 0 && (
-      <div className="absolute z-10 left-24 top-full mt-0.5 opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity" style={tipBox}>
-        <div className="text-white font-semibold text-[11px]">{label} · {value} clientes</div>
-        <ClientList clients={clients} max={10} />
+// gráfico de FUNIL de verdade (trapézios afunilando), estilo calculadora.
+const FunnelChart: React.FC<{ stages: FunnelStage[]; noshow: { value: number; pct: number | null; clients: ClientRef[] } }> = ({ stages, noshow }) => {
+  const [hover, setHover] = useState<number | null>(null);
+  const W = 660, BAND = 66, GAP = 8;
+  const H = stages.length * BAND;
+  const maxV = Math.max(1, stages[0].value);
+  const half = (v: number) => (Math.max(0.03, v / maxV) * W) / 2; // sliver mínimo p/ etapa não sumir
+  const cx = W / 2;
+  return (
+    <div className="relative">
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" preserveAspectRatio="xMidYMid meet" style={{ display: "block" }}>
+        {stages.map((s, i) => {
+          const next = stages[i + 1];
+          const topH = half(s.value);
+          const botH = half(next ? next.value : s.value * 0.82);
+          const y = i * BAND, y2 = y + BAND - GAP;
+          const dark = s.color === PAL.white;
+          const dim = hover !== null && hover !== i;
+          return (
+            <g key={s.key} onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)}>
+              <polygon points={`${cx - topH},${y} ${cx + topH},${y} ${cx + botH},${y2} ${cx - botH},${y2}`}
+                fill={s.color} opacity={dim ? 0.5 : 1} style={{ transition: "opacity .15s" }} />
+              <text x={cx} y={y + (BAND - GAP) / 2 - 3} textAnchor="middle" fontSize="13" fontWeight="700" fill={dark ? "#000" : "#fff"}>{s.label}</text>
+              <text x={cx} y={y + (BAND - GAP) / 2 + 15} textAnchor="middle" fontSize="16" fontWeight="800" fill={dark ? "#000" : "#fff"}>{s.value}</text>
+              {s.convFromPrev != null && (
+                <text x={W - 2} y={y + 18} textAnchor="end" fontSize="12" fontWeight="700" fill={PAL.muted}>▲ {s.convFromPrev}%</text>
+              )}
+            </g>
+          );
+        })}
+      </svg>
+      {hover != null && stages[hover].clients.length > 0 && (
+        <div className="absolute z-20 pointer-events-none" style={{ ...tipBox, left: "58%", top: hover * BAND }}>
+          <div className="text-white font-semibold text-[11px]">{stages[hover].label} · {stages[hover].value} clientes</div>
+          <ClientList clients={stages[hover].clients} max={10} />
+        </div>
+      )}
+      {/* No Show — vazamento das agendadas */}
+      <div className="mt-3 flex items-center gap-2 text-[12px] border-t border-[var(--color-v4-border)] pt-2.5">
+        <UserX size={13} className="text-[var(--color-v4-text-muted)]" />
+        <span className="text-[var(--color-v4-text-muted)]">No Show</span>
+        <span className="px-2 py-0.5 rounded font-bold text-white" style={{ background: PAL.grayDark }}>{noshow.value}</span>
+        {noshow.pct != null && <span className="text-[var(--color-v4-text-muted)]">— {noshow.pct}% das agendadas não compareceram</span>}
       </div>
-    )}
-  </div>
-);
+    </div>
+  );
+};
 
 const HourTip: React.FC<any> = ({ active, payload }) => {
   if (!active || !payload?.length) return null;
