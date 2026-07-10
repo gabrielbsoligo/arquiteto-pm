@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
-    "labs:verify": "node scripts/labs/verify-readonly.mjs"
+    "labs:verify": "node scripts/labs/verify-readonly.mjs",
+    "labs:verify-nowrite": "tsx scripts/labs/verify-no-write.ts"
   },
   "dependencies": {
     "@google/genai": "^1.29.0",

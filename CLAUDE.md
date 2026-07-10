@@ -23,6 +23,14 @@ local (`/api/labs/query`); a connection string (`DATABASE_URL_READONLY`, no seu
 > Por isso a via de dados do Labs é o `erick_readonly`, e não a anon.
 > Nunca use a `service_role` key nem o usuário `postgres` (ignoram grants/RLS).
 
+> 🛡️ **O cliente Supabase compartilhado (`src/lib/supabase.ts`) foi neutralizado:**
+> `makeReadonlyClient` (`src/lib/readonlySupabase.ts`) intercepta **toda escrita**
+> (`insert/update/delete/upsert`, RPC de escrita, `functions.invoke`, storage write)
+> e devolve erro `LABS_READONLY` **sem tocar o banco** — então nenhuma tela herdada
+> grava, nem por engano. Login e leitura (`select`, RPC `get_*`) seguem normais.
+> Prova: `npm run labs:verify-nowrite`. (Não se mexe no RLS — ele é compartilhado
+> com o SalesHub de produção.)
+
 ---
 
 ## ✅ PODE
