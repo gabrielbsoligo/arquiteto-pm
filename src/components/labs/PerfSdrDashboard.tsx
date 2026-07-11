@@ -27,6 +27,7 @@ type DashData = { members: TeamMember[]; leads: Lead[]; deals: Deal[]; reunioes:
 const fmtBRL = (v: number) =>
   v.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
 const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const fmtDay = (d?: string) => (d ? new Date(d).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit" }) : "—");
 
 const card = "rounded-xl border border-[var(--color-v4-border)] bg-[var(--color-v4-card)] p-4";
 const tipBox: React.CSSProperties = { background: "#0a0a0a", border: `1px solid ${PAL.grid}`, borderRadius: 10, padding: "8px 10px", fontSize: 12, maxWidth: 280 };
@@ -41,7 +42,7 @@ const ClientList: React.FC<{ clients?: ClientRef[]; max?: number }> = ({ clients
         <div key={i} className="flex items-center justify-between gap-3 text-[11px]">
           <span className="text-white truncate">{c.empresa}</span>
           <span className="text-[var(--color-v4-text-muted)] whitespace-nowrap">
-            {c.sdr ? c.sdr.split(" ")[0] : ""}{c.canal ? ` · ${CANAL_LABEL[c.canal] || c.canal}` : ""}{c.valor ? ` · ${fmtBRL(c.valor)}` : ""}
+            {c.sdr ? c.sdr.split(" ")[0] : ""}{c.canal ? ` · ${CANAL_LABEL[c.canal] || c.canal}` : ""}{c.data ? ` · ${fmtDay(c.data)}` : ""}{c.valor ? ` · ${fmtBRL(c.valor)}` : ""}
           </span>
         </div>
       ))}
@@ -133,6 +134,23 @@ export const PerfSdrDashboard: React.FC<{ data: DashData; demo?: boolean }> = ({
   }, [m]);
 
   const totalLbCusto = m.leadbrokerBySdr.reduce((a, x) => a + x.custo, 0);
+
+  // No-show empilhado por SDR × canal (p/ o gráfico)
+  const nsCanaisLabels = useMemo(
+    () => Array.from(new Set(m.noShow.list.map((c) => CANAL_LABEL[c.canal || "sem origem"] || c.canal || "sem origem"))),
+    [m],
+  );
+  const nsStacked = useMemo(() => {
+    const bySdr: Record<string, any> = {};
+    for (const c of m.noShow.list) {
+      const sdr = c.sdr ? c.sdr.split(" ")[0] : "Sem SDR";
+      const cl = CANAL_LABEL[c.canal || "sem origem"] || c.canal || "sem origem";
+      const row = (bySdr[sdr] ||= { sdr });
+      row[cl] = (row[cl] || 0) + 1;
+      (row[`_cli_${cl}`] ||= []).push(c);
+    }
+    return Object.values(bySdr);
+  }, [m]);
 
   return (
     <div className="flex-1 overflow-y-auto bg-[var(--color-v4-bg)] p-6">
@@ -382,6 +400,68 @@ export const PerfSdrDashboard: React.FC<{ data: DashData; demo?: boolean }> = ({
             </div>
           )}
         </div>
+      </Section>
+
+      {/* NO SHOW — quantos, de quais canais, de qual SDR, quando era pra acontecer */}
+      <Section title="No Show — quem não compareceu" icon={<UserX size={14} className="text-[var(--color-v4-red)]" />}
+        hint="Reunião marcada como realizada mas sem comparecimento. “Era pra acontecer” = data da reunião. Passe o mouse nas barras pra ver os clientes.">
+        {m.noShow.total === 0 ? (
+          <div className={card}><div className="text-xs text-[var(--color-v4-text-muted)] py-6 text-center">Nenhum no-show no período. 🎉</div></div>
+        ) : (
+          <>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-3">
+              <div className={card}>
+                <div className="text-[11px] text-[var(--color-v4-text-muted)] flex items-center gap-1"><UserX size={12} /> Total no-show</div>
+                <div className="text-4xl font-bold mt-1" style={{ color: PAL.red }}>{m.noShow.total}</div>
+                <div className="text-[10px] text-[var(--color-v4-text-muted)] mt-0.5">clientes que não compareceram</div>
+                <div className="text-[10px] text-[var(--color-v4-text-muted)] mt-3 mb-1">Por canal</div>
+                {m.noShow.byCanal.map((c) => {
+                  const max = Math.max(1, ...m.noShow.byCanal.map((x) => x.count));
+                  return (
+                    <div key={c.canal} className="flex items-center gap-2 py-0.5">
+                      <span className="w-20 text-[10px] text-[var(--color-v4-text-muted)] truncate text-right">{c.label}</span>
+                      <div className="flex-1 h-3 rounded bg-[var(--color-v4-surface)] overflow-hidden"><div className="h-full rounded" style={{ width: `${(100 * c.count) / max}%`, background: PAL.red }} /></div>
+                      <span className="w-6 text-[10px] text-white text-right">{c.count}</span>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className={`${card} lg:col-span-2`}>
+                <div className="text-[11px] text-[var(--color-v4-text-muted)] mb-1">No-show por SDR (empilhado por canal) — hover mostra clientes e data</div>
+                <ResponsiveContainer width="100%" height={220}>
+                  <BarChart data={nsStacked} margin={{ top: 8, right: 8, left: -18, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={PAL.grid} />
+                    <XAxis dataKey="sdr" tick={{ fontSize: 11, fill: PAL.muted }} />
+                    <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: PAL.muted }} />
+                    <Tooltip cursor={{ fill: "#ffffff10" }} content={<BarTip />} />
+                    <Legend wrapperStyle={{ fontSize: 11 }} />
+                    {nsCanaisLabels.map((cl, i) => <Bar key={cl} dataKey={cl} stackId="ns" fill={seriesColor(i)} />)}
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+            <div className={card}>
+              <div className="text-[11px] text-[var(--color-v4-text-muted)] mb-2">Detalhe — {m.noShow.total} no-show(s), mais recentes primeiro</div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm min-w-[560px]">
+                  <thead><tr className="text-[11px] text-[var(--color-v4-text-muted)] text-left">
+                    <th className="px-2 py-1">Cliente</th><th className="px-2 py-1">SDR</th><th className="px-2 py-1">Canal</th><th className="px-2 py-1">Era pra acontecer</th>
+                  </tr></thead>
+                  <tbody>
+                    {m.noShow.list.map((c, i) => (
+                      <tr key={i} className="border-t border-[var(--color-v4-border)] text-white">
+                        <td className="px-2 py-1.5">{c.empresa}</td>
+                        <td className="px-2 py-1.5 text-[var(--color-v4-text-muted)]">{c.sdr?.split(" ")[0] || "—"}</td>
+                        <td className="px-2 py-1.5"><span className="text-[11px] px-1.5 py-0.5 rounded bg-[var(--color-v4-surface)]">{CANAL_LABEL[c.canal || ""] || c.canal || "—"}</span></td>
+                        <td className="px-2 py-1.5 text-[var(--color-v4-text-muted)]">{fmtDay(c.data)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </>
+        )}
       </Section>
 
       <div className="text-[10px] text-[var(--color-v4-text-muted)] opacity-60 pb-6">

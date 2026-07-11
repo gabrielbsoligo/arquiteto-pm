@@ -57,7 +57,7 @@ const dealValor = (d: Deal) => {
   return a > 0 ? a : (Number(d.valor_escopo) || 0) + (Number(d.valor_recorrente) || 0);
 };
 
-export interface ClientRef { empresa: string; sdr?: string; canal?: string; valor?: number; }
+export interface ClientRef { empresa: string; sdr?: string; canal?: string; valor?: number; data?: string; }
 export interface Filters { from: string; to: string; sdrIds: string[] | null; } // sdrIds null = todos
 
 export interface SdrRow {
@@ -80,6 +80,12 @@ export interface Metrics {
   channels: ChannelRow[];
   leadbrokerBySdr: { name: string; qtd: number; custo: number; clients: ClientRef[] }[];
   fechadas: ClientRef[];
+  noShow: {
+    total: number;
+    list: ClientRef[]; // cada no-show com empresa/sdr/canal/data (quando era pra acontecer)
+    byCanal: { canal: string; label: string; count: number }[];
+    bySdr: { name: string; count: number }[];
+  };
   hours: HourSlice[];
 }
 
@@ -107,7 +113,7 @@ export function computeMetrics(
   const reusInRange = reunioes.filter((r) => okSdr(r.sdr_id) && inRange(day(r.data_reuniao), f.from, f.to));
   // deals fechados (contrato assinado) na janela — fiéis à aba Contratos/pipeline
   const closed = deals.filter((d) => d.status === "contrato_assinado" && inRange(dealDay(d), f.from, f.to) && (!filtering || okSdr(d.sdr_id)));
-  const reuCli = (arr: Reuniao[]) => arr.map((r) => ({ empresa: r.empresa || "—", sdr: r.sdr_id ? nameById.get(r.sdr_id) : undefined, canal: canalOfReu(r) }));
+  const reuCli = (arr: Reuniao[]) => arr.map((r) => ({ empresa: r.empresa || "—", sdr: r.sdr_id ? nameById.get(r.sdr_id) : undefined, canal: canalOfReu(r), data: r.data_reuniao }));
   const dealCli = (arr: Deal[]) => arr.map((d) => ({ empresa: d.empresa || "—", sdr: d.sdr_id ? nameById.get(d.sdr_id) : undefined, canal: canalOfDeal(d), valor: dealValor(d) }));
 
   // ---------- por SDR ----------
@@ -198,6 +204,23 @@ export function computeMetrics(
   const leadbrokerBySdr = Object.values(lbBySdr).sort((a, b) => b.qtd - a.qtd);
   const fechadas = dealCli(closed).sort((a, b) => (b.valor || 0) - (a.valor || 0));
 
+  // ---------- NO SHOW: quantos, de quais canais, de qual SDR, quando era pra acontecer ----------
+  const nsList = reuCli(reusInRange.filter(isNoShow)).sort((a, b) => (b.data || "").localeCompare(a.data || ""));
+  const nsCanalMap: Record<string, number> = {};
+  const nsSdrMap: Record<string, number> = {};
+  for (const c of nsList) {
+    const ck = c.canal || "sem origem";
+    nsCanalMap[ck] = (nsCanalMap[ck] || 0) + 1;
+    const sk = c.sdr || "Sem SDR";
+    nsSdrMap[sk] = (nsSdrMap[sk] || 0) + 1;
+  }
+  const noShow = {
+    total: nsList.length,
+    list: nsList,
+    byCanal: Object.entries(nsCanalMap).map(([canal, count]) => ({ canal, label: CANAL_LABEL[canal] || canal, count })).sort((a, b) => b.count - a.count),
+    bySdr: Object.entries(nsSdrMap).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count),
+  };
+
   // ---------- ligações por hora (pizza) ----------
   const hourMap = new Map<number, { total: number; bySdr: Record<string, number> }>();
   for (const l of ligacoes) {
@@ -218,7 +241,7 @@ export function computeMetrics(
       color: v.total / maxH > 0.66 ? PAL.red : v.total / maxH > 0.33 ? PAL.redSoft : PAL.gray,
     }));
 
-  return { totals, funnel, convRates, sdrs, channels, leadbrokerBySdr, fechadas, hours };
+  return { totals, funnel, convRates, sdrs, channels, leadbrokerBySdr, fechadas, noShow, hours };
 }
 
 // =============================================================
