@@ -2,7 +2,7 @@ import React, { useState, useMemo } from "react";
 import { useAppStore } from "../store";
 import { DEAL_STATUS_LABELS, TEMPERATURA_LABELS, type Deal, type DealStatus, type Temperatura } from "../types";
 import { cn } from "./Layout";
-import { Plus, ExternalLink, Search, ArrowUpDown, LayoutGrid, List, ChevronUp, ChevronDown, Thermometer } from "lucide-react";
+import { Plus, ExternalLink, Search, ArrowUpDown, LayoutGrid, List, ChevronUp, ChevronDown, Thermometer, Clock } from "lucide-react";
 import { DealDrawer } from "./DealDrawer";
 import { FeedbackDrawer } from "./FeedbackDrawer";
 import { DragDropContext, Droppable, Draggable, type DropResult } from "@hello-pangea/dnd";
@@ -20,6 +20,16 @@ import {
 } from "./PipelineTableColumns";
 
 // Nova ordem do kanban
+// data da última atualização do card (updated_at) + idade relativa, pra ver sem abrir.
+function updatedInfo(d?: string): { label: string; stale: boolean } {
+  if (!d) return { label: 'sem data', stale: false };
+  const dt = new Date(d);
+  const days = Math.floor((Date.now() - dt.getTime()) / 86400000);
+  const date = dt.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' });
+  const rel = days <= 0 ? 'hoje' : days === 1 ? 'ontem' : `há ${days}d`;
+  return { label: `${date} · ${rel}`, stale: days >= 14 };
+}
+
 const PIPELINE_STAGES: DealStatus[] = ['dar_feedback', 'follow_longo', 'negociacao', 'contrato_na_rua', 'contrato_assinado', 'perdido'];
 
 const STAGE_COLORS: Record<DealStatus, string> = {
@@ -343,6 +353,11 @@ export const PipelineView: React.FC = () => {
                                     </div>
                                     <span className="text-[var(--color-v4-text-muted)]">{deal.closer?.name?.split(' ')[0] || '—'}</span>
                                   </div>
+                                  {(() => { const u = updatedInfo(deal.updated_at); return (
+                                    <div className={cn("mt-1.5 flex items-center gap-1 text-[10px]", u.stale ? "text-amber-400/80" : "text-[var(--color-v4-text-muted)]")}>
+                                      <Clock size={9} /> atualizado {u.label}
+                                    </div>
+                                  ); })()}
                                 </div>
                               )}
                             </Draggable>

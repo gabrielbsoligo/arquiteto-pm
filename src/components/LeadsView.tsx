@@ -2,7 +2,7 @@ import React, { useState, useMemo } from "react";
 import { useAppStore } from "../store";
 import { LEAD_STATUS_LABELS, CANAL_LABELS, type Lead, type LeadCanal, type LeadStatus } from "../types";
 import { cn } from "./Layout";
-import { Plus, Search, ExternalLink, Phone, Building2, Calendar, LayoutGrid, List, ChevronUp, ChevronDown, FileSpreadsheet } from "lucide-react";
+import { Plus, Search, ExternalLink, Phone, Building2, Calendar, LayoutGrid, List, ChevronUp, ChevronDown, FileSpreadsheet, Clock } from "lucide-react";
 import { LeadDrawer } from "./LeadDrawer";
 import { MktlabImporter } from "./MktlabImporter";
 import { ImportLeadsModal } from "./ImportLeadsModal";
@@ -32,6 +32,16 @@ const STAGE_BORDER: Record<string, string> = {
   sem_contato: 'border-gray-500', em_follow: 'border-blue-500', reuniao_marcada: 'border-yellow-500',
   reuniao_realizada: 'border-green-500', noshow: 'border-orange-500',
 };
+
+// data da última atualização do card (updated_at) + idade relativa, pra ver sem abrir.
+function updatedInfo(d?: string): { label: string; stale: boolean } {
+  if (!d) return { label: 'sem data', stale: false };
+  const dt = new Date(d);
+  const days = Math.floor((Date.now() - dt.getTime()) / 86400000);
+  const date = dt.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' });
+  const rel = days <= 0 ? 'hoje' : days === 1 ? 'ontem' : `há ${days}d`;
+  return { label: `${date} · ${rel}`, stale: days >= 14 };
+}
 
 type SortField = 'empresa' | 'created_at' | 'canal' | 'status';
 type SortDir = 'asc' | 'desc';
@@ -301,6 +311,11 @@ export const LeadsView: React.FC = () => {
                                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--color-v4-surface)] text-[var(--color-v4-text-muted)]">{CANAL_LABELS[lead.canal]}</span>
                                     <span className="text-[10px] text-[var(--color-v4-text-muted)]">{lead.sdr?.name?.split(' ')[0]}</span>
                                   </div>
+                                  {(() => { const u = updatedInfo(lead.updated_at); return (
+                                    <div className={cn("mt-1 flex items-center gap-1 text-[10px]", u.stale ? "text-amber-400/80" : "text-[var(--color-v4-text-muted)]")}>
+                                      <Clock size={9} /> atualizado {u.label}
+                                    </div>
+                                  ); })()}
                                   {['sem_contato', 'em_follow'].includes(lead.status) && (
                                     <button onClick={e => { e.stopPropagation(); setAgendarLead(lead); }}
                                       className="mt-2 w-full flex items-center justify-center gap-1 py-1.5 rounded text-[10px] font-medium bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20 opacity-0 group-hover:opacity-100 transition-opacity">
