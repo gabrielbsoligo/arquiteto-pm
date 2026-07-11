@@ -33,14 +33,26 @@ const STAGE_BORDER: Record<string, string> = {
   reuniao_realizada: 'border-green-500', noshow: 'border-orange-500',
 };
 
-// data da última atualização do card (updated_at) + idade relativa, pra ver sem abrir.
-function updatedInfo(d?: string): { label: string; stale: boolean } {
-  if (!d) return { label: 'sem data', stale: false };
-  const dt = new Date(d);
-  const days = Math.floor((Date.now() - dt.getTime()) / 86400000);
-  const date = dt.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' });
-  const rel = days <= 0 ? 'hoje' : days === 1 ? 'ontem' : `há ${days}d`;
-  return { label: `${date} · ${rel}`, stale: days >= 14 };
+// Chips de datas registradas (reunião + última atualização) pra ver no card sem abrir.
+type ReuLike = { data_agendamento?: string; data_reuniao?: string; realizada?: boolean; show?: boolean };
+type DateChip = { key: string; label: string; date: string; tone: 'muted' | 'ok' | 'bad' | 'warn' };
+const CHIP_TONE: Record<string, string> = {
+  muted: 'bg-[var(--color-v4-surface)] text-[var(--color-v4-text-muted)]',
+  ok: 'bg-emerald-500/15 text-emerald-400',
+  bad: 'bg-red-500/15 text-red-400',
+  warn: 'bg-yellow-500/15 text-yellow-400',
+};
+const fmtD = (d?: string) => (d ? new Date(d).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' }) : '');
+function dateChips(reu: ReuLike | undefined, updatedAt?: string): DateChip[] {
+  const chips: DateChip[] = [];
+  if (reu?.data_agendamento) chips.push({ key: 'ag', label: 'Agendado', date: fmtD(reu.data_agendamento), tone: 'muted' });
+  if (reu?.data_reuniao) {
+    const held = !!(reu.realizada && reu.show);
+    const ns = !!(reu.realizada && !reu.show);
+    chips.push({ key: 'reu', label: held ? 'Realizada' : ns ? 'No-show' : 'Reunião', date: fmtD(reu.data_reuniao), tone: held ? 'ok' : ns ? 'bad' : 'warn' });
+  }
+  if (updatedAt) chips.push({ key: 'up', label: 'Atualizado', date: fmtD(updatedAt), tone: 'muted' });
+  return chips;
 }
 
 type SortField = 'empresa' | 'created_at' | 'canal' | 'status';
@@ -66,6 +78,16 @@ function sortLeads(leads: Lead[], field: SortField, dir: SortDir): Lead[] {
 
 export const LeadsView: React.FC = () => {
   const { leads, members, addReuniao, updateLead, updateReuniao, reunioes, currentUser } = useAppStore();
+  // reunião mais recente (por data_reuniao) de cada lead — p/ mostrar datas no card
+  const reuByLead = useMemo(() => {
+    const m = new Map<string, any>();
+    for (const r of reunioes) {
+      if (!r.lead_id) continue;
+      const cur = m.get(r.lead_id);
+      if (!cur || (r.data_reuniao || '') > (cur.data_reuniao || '')) m.set(r.lead_id, r);
+    }
+    return m;
+  }, [reunioes]);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [showNew, setShowNew] = useState(false);
   const [showMktlab, setShowMktlab] = useState(false);
@@ -311,11 +333,15 @@ export const LeadsView: React.FC = () => {
                                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--color-v4-surface)] text-[var(--color-v4-text-muted)]">{CANAL_LABELS[lead.canal]}</span>
                                     <span className="text-[10px] text-[var(--color-v4-text-muted)]">{lead.sdr?.name?.split(' ')[0]}</span>
                                   </div>
-                                  {(() => { const u = updatedInfo(lead.updated_at); return (
-                                    <div className={cn("mt-1 flex items-center gap-1 text-[10px]", u.stale ? "text-amber-400/80" : "text-[var(--color-v4-text-muted)]")}>
-                                      <Clock size={9} /> atualizado {u.label}
+                                  {(() => { const chips = dateChips(reuByLead.get(lead.id), lead.updated_at); return chips.length ? (
+                                    <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                                      {chips.map(c => (
+                                        <span key={c.key} className={cn("inline-flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded", CHIP_TONE[c.tone])}>
+                                          {c.key === 'up' && <Clock size={8} />}{c.label} {c.date}
+                                        </span>
+                                      ))}
                                     </div>
-                                  ); })()}
+                                  ) : null; })()}
                                   {['sem_contato', 'em_follow'].includes(lead.status) && (
                                     <button onClick={e => { e.stopPropagation(); setAgendarLead(lead); }}
                                       className="mt-2 w-full flex items-center justify-center gap-1 py-1.5 rounded text-[10px] font-medium bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20 opacity-0 group-hover:opacity-100 transition-opacity">
