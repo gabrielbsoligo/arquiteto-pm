@@ -404,9 +404,9 @@ export const PerfSdrDashboard: React.FC<{ data: DashData; demo?: boolean }> = ({
 
       {/* NO SHOW — quantos, de quais canais, de qual SDR, quando era pra acontecer */}
       <Section title="No Show — quem não compareceu" icon={<UserX size={14} className="text-[var(--color-v4-red)]" />}
-        hint="Reunião marcada como realizada mas sem comparecimento. “Era pra acontecer” = data da reunião. Passe o mouse nas barras pra ver os clientes.">
+        hint="No-show em aberto: reunião sem comparecimento e que NÃO recuperou (não fechou contrato nem foi reagendada). “Era pra acontecer” = data da reunião. Hover mostra os clientes.">
         {m.noShow.total === 0 ? (
-          <div className={card}><div className="text-xs text-[var(--color-v4-text-muted)] py-6 text-center">Nenhum no-show no período. 🎉</div></div>
+          <div className={card}><div className="text-xs text-[var(--color-v4-text-muted)] py-6 text-center">Nenhum no-show em aberto no período. 🎉</div></div>
         ) : (
           <>
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-3">

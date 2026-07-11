@@ -113,6 +113,19 @@ export function computeMetrics(
   const reusInRange = reunioes.filter((r) => okSdr(r.sdr_id) && inRange(day(r.data_reuniao), f.from, f.to));
   // deals fechados (contrato assinado) na janela — fiéis à aba Contratos/pipeline
   const closed = deals.filter((d) => d.status === "contrato_assinado" && inRange(dealDay(d), f.from, f.to) && (!filtering || okSdr(d.sdr_id)));
+
+  // No-show "em aberto": NÃO conta se o cliente recuperou — fechou (contrato assinado,
+  // em qualquer data) OU foi reagendado (existe reunião mais nova pro mesmo lead).
+  // (ex.: Colégio Dom Bosco no-showou mas fechou → não é mais no-show.)
+  const wonLeadIds = new Set(deals.filter((d) => d.status === "contrato_assinado" && d.lead_id).map((d) => d.lead_id as string));
+  const maxReuByLead = new Map<string, string>();
+  for (const r of reunioes) {
+    if (!r.lead_id) continue;
+    const cur = maxReuByLead.get(r.lead_id);
+    if (!cur || (r.data_reuniao || "") > cur) maxReuByLead.set(r.lead_id, r.data_reuniao || "");
+  }
+  const recuperou = (r: Reuniao) => !!r.lead_id && (wonLeadIds.has(r.lead_id) || (maxReuByLead.get(r.lead_id) || "") > (r.data_reuniao || ""));
+  const isOpenNoShow = (r: Reuniao) => isNoShow(r) && !recuperou(r);
   const reuCli = (arr: Reuniao[]) => arr.map((r) => ({ empresa: r.empresa || "—", sdr: r.sdr_id ? nameById.get(r.sdr_id) : undefined, canal: canalOfReu(r), data: r.data_reuniao }));
   const dealCli = (arr: Deal[]) => arr.map((d) => ({ empresa: d.empresa || "—", sdr: d.sdr_id ? nameById.get(d.sdr_id) : undefined, canal: canalOfDeal(d), valor: dealValor(d) }));
 
@@ -123,7 +136,7 @@ export function computeMetrics(
       const ligs = ligacoes.filter((l) => l.member_id === s.id && inRange(day(l.started_at), f.from, f.to));
       const reus = reusInRange.filter((r) => r.sdr_id === s.id);
       const reRe = reus.filter(isReal);
-      const reNo = reus.filter(isNoShow);
+      const reNo = reus.filter(isOpenNoShow);
       const fes = closed.filter((d) => d.sdr_id === s.id);
       return {
         id: s.id, name: s.name, first: s.name.split(" ")[0], color: seriesColor(i),
@@ -140,7 +153,7 @@ export function computeMetrics(
     conexoes: sdrs.reduce((a, s) => a + s.conexoes, 0),
     agendadas: reusInRange.length,
     realizadas: reusInRange.filter(isReal).length,
-    noshow: reusInRange.filter(isNoShow).length,
+    noshow: reusInRange.filter(isOpenNoShow).length,
     fechadas: closed.length,
   };
 
@@ -189,7 +202,7 @@ export function computeMetrics(
     row.agendadas++;
     row.clientsAg.push({ empresa: r.empresa || "—", sdr: r.sdr_id ? nameById.get(r.sdr_id) : undefined, canal: c });
     if (isReal(r)) row.realizadas++;
-    if (isNoShow(r)) row.noshow++;
+    if (isOpenNoShow(r)) row.noshow++;
   }
   for (const d of closed) {
     const c = canalOfDeal(d);
@@ -205,7 +218,7 @@ export function computeMetrics(
   const fechadas = dealCli(closed).sort((a, b) => (b.valor || 0) - (a.valor || 0));
 
   // ---------- NO SHOW: quantos, de quais canais, de qual SDR, quando era pra acontecer ----------
-  const nsList = reuCli(reusInRange.filter(isNoShow)).sort((a, b) => (b.data || "").localeCompare(a.data || ""));
+  const nsList = reuCli(reusInRange.filter(isOpenNoShow)).sort((a, b) => (b.data || "").localeCompare(a.data || ""));
   const nsCanalMap: Record<string, number> = {};
   const nsSdrMap: Record<string, number> = {};
   for (const c of nsList) {
