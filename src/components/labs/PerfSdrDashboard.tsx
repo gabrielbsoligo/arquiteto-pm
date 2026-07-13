@@ -163,6 +163,13 @@ export const PerfSdrDashboard: React.FC<{ data: DashData; demo?: boolean }> = ({
     () => m.realizadasByCloser.map((c) => ({ closer: c.closer, Realizadas: c.count, _cli_Realizadas: c.clients })),
     [m],
   );
+  // lista achatada: uma linha por reunião realizada, com o closer que a conduziu
+  const realizadasFlat = useMemo(
+    () => m.realizadasByCloser
+      .flatMap((c) => c.clients.map((cl) => ({ empresa: cl.empresa, closer: c.closer, sdr: cl.sdr, canal: cl.canal, data: cl.data })))
+      .sort((a, b) => (b.data || "").localeCompare(a.data || "")),
+    [m],
+  );
 
   // No-show empilhado por SDR × canal (p/ o gráfico)
   const nsCanaisLabels = useMemo(
@@ -349,6 +356,25 @@ export const PerfSdrDashboard: React.FC<{ data: DashData; demo?: boolean }> = ({
                   <Bar dataKey="Realizadas" fill={PAL.red} radius={[0, 3, 3, 0]}><LabelList dataKey="Realizadas" position="right" fill={PAL.muted} fontSize={11} /></Bar>
                 </BarChart>
               </ResponsiveContainer>
+              <div className="overflow-x-auto mt-3 border-t border-[var(--color-v4-border)] pt-3">
+                <div className="text-[11px] text-[var(--color-v4-text-muted)] mb-2">Detalhe — o closer que realizou cada reunião</div>
+                <table className="w-full text-sm min-w-[620px]">
+                  <thead><tr className="text-[11px] text-[var(--color-v4-text-muted)] text-left">
+                    <th className="px-2 py-1">Cliente</th><th className="px-2 py-1">Closer</th><th className="px-2 py-1">SDR (origem)</th><th className="px-2 py-1">Canal</th><th className="px-2 py-1">Data</th>
+                  </tr></thead>
+                  <tbody>
+                    {realizadasFlat.map((r, i) => (
+                      <tr key={i} className="border-t border-[var(--color-v4-border)] text-white">
+                        <td className="px-2 py-1.5">{r.empresa}</td>
+                        <td className="px-2 py-1.5 font-medium">{r.closer.split(" ")[0]}</td>
+                        <td className="px-2 py-1.5 text-[var(--color-v4-text-muted)]">{r.sdr?.split(" ")[0] || "—"}</td>
+                        <td className="px-2 py-1.5"><span className="text-[11px] px-1.5 py-0.5 rounded bg-[var(--color-v4-surface)]">{CANAL_LABEL[r.canal || ""] || r.canal || "—"}</span></td>
+                        <td className="px-2 py-1.5 text-[var(--color-v4-text-muted)]">{fmtDay(r.data)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </>
           )}
         </div>
