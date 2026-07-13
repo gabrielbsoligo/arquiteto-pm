@@ -515,7 +515,10 @@ const FunnelChart: React.FC<{ stages: FunnelStage[]; noshow: { value: number; pc
               <text x={cx} y={my} textAnchor="middle" dominantBaseline="middle" fontSize="19" fontWeight="800" fill="#fff"
                 stroke="#0a0a0a" strokeWidth="0.7" style={{ paintOrder: "stroke" }}>{s.value}</text>
               {s.convFromPrev != null && (
-                <text x={W} y={my} textAnchor="end" dominantBaseline="middle" fontSize="13" fontWeight="700" fill={PAL.muted}>▲ {s.convFromPrev}%</text>
+                <text textAnchor="end" fontWeight="700">
+                  <tspan x={W} y={my - 6} fontSize="13" fill={s.convOk == null ? PAL.muted : s.convOk ? "#22c55e" : PAL.red}>▲ {s.convFromPrev}%</tspan>
+                  {s.idealConv != null && <tspan x={W} y={my + 9} fontSize="9.5" fontWeight="500" fill={PAL.muted}>meta ≥{s.idealConv}%</tspan>}
+                </text>
               )}
             </g>
           );

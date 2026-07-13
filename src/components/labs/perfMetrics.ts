@@ -65,7 +65,7 @@ export interface SdrRow {
   ligacoes: number; conexoes: number; agendadas: number; realizadas: number; fechadas: number; noshow: number;
   clientsAg: ClientRef[]; clientsRe: ClientRef[]; clientsNo: ClientRef[]; clientsFe: ClientRef[];
 }
-export interface FunnelStage { key: string; label: string; value: number; convFromPrev: number | null; color: string; clients: ClientRef[]; }
+export interface FunnelStage { key: string; label: string; value: number; convFromPrev: number | null; idealConv: number | null; convOk: boolean | null; color: string; clients: ClientRef[]; }
 export interface ChannelRow {
   canal: string; label: string; leads: number; agendadas: number; realizadas: number; noshow: number; fechadas: number; custo: number;
   clientsFe: ClientRef[]; clientsAg: ClientRef[];
@@ -163,11 +163,19 @@ export function computeMetrics(
     { key: "agendadas", label: "Agendadas", value: totals.agendadas, clients: reuCli(reusInRange) },
     { key: "realizadas", label: "Realizadas", value: totals.realizadas, clients: reuCli(reusInRange.filter(isReal)) },
     { key: "fechadas", label: "Fechadas", value: totals.fechadas, clients: dealCli(closed) },
-  ].map((s, i, arr) => ({
-    ...s,
-    color: FUNNEL_COLORS[s.key],
-    convFromPrev: i > 0 && arr[i - 1].value > 0 ? Math.round((100 * s.value) / arr[i - 1].value) : null,
-  }));
+  ].map((s, i, arr) => {
+    // meta ideal da conversão que ENTRA nesta etapa (todas "maior é melhor")
+    const IDEAL_CONV: Record<string, number> = { conexoes: 15, agendadas: 20, realizadas: 80, fechadas: 30 };
+    const convFromPrev = i > 0 && arr[i - 1].value > 0 ? Math.round((100 * s.value) / arr[i - 1].value) : null;
+    const idealConv = IDEAL_CONV[s.key] ?? null;
+    return {
+      ...s,
+      color: FUNNEL_COLORS[s.key],
+      convFromPrev,
+      idealConv,
+      convOk: convFromPrev != null && idealConv != null ? convFromPrev >= idealConv : null,
+    };
+  });
 
   const pct = (a: number, b: number) => (b > 0 ? Math.round((100 * a) / b) : null);
   // metas ideais (benchmark) por etapa. dir=up → maior é melhor; dir=down → menor é melhor.
