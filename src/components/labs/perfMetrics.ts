@@ -94,6 +94,9 @@ export interface Metrics {
 export function computeMetrics(
   data: { members: TeamMember[]; leads: Lead[]; deals: Deal[]; reunioes: Reuniao[]; ligacoes: Ligacao4com[] },
   f: Filters,
+  // ligações/conexões autoritativas por SDR (RPC get_perf_ligacoes). Se ausente, conta do store
+  // (que é limitado às 2000 ligações mais recentes → subconta períodos longos).
+  ligBySdr?: Record<string, { feitas: number; atendidas: number }>,
 ): Metrics {
   const { members, leads, deals, reunioes, ligacoes } = data;
   const sdrsAll = members.filter((m) => m.role === "sdr" && m.active);
@@ -140,10 +143,11 @@ export function computeMetrics(
       const reRe = reus.filter(isReal);
       const reNo = reus.filter(isOpenNoShow);
       const fes = closed.filter((d) => d.sdr_id === s.id);
+      const rpcLig = ligBySdr?.[s.id];
       return {
         id: s.id, name: s.name, first: s.name.split(" ")[0], color: seriesColor(i),
-        ligacoes: ligs.length,
-        conexoes: ligs.filter((l) => l.atendida).length,
+        ligacoes: rpcLig ? rpcLig.feitas : ligs.length,
+        conexoes: rpcLig ? rpcLig.atendidas : ligs.filter((l) => l.atendida).length,
         agendadas: reus.length, realizadas: reRe.length, noshow: reNo.length, fechadas: fes.length,
         clientsAg: reuCli(reus), clientsRe: reuCli(reRe), clientsNo: reuCli(reNo),
         clientsFe: dealCli(fes),

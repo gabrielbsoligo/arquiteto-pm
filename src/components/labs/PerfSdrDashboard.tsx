@@ -1,10 +1,11 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell,
   PieChart, Pie, LabelList,
 } from "recharts";
 import { Phone, Link2, CalendarClock, CheckCircle2, Trophy, UserX, Users, Filter, Radio, ShoppingCart } from "lucide-react";
 import { useAppStore } from "../../store";
+import { supabase } from "../../lib/supabase";
 import { LoginView } from "../LoginView";
 import {
   computeMetrics, makeDemoData, PAL, seriesColor, CANAL_LABEL,
@@ -111,7 +112,29 @@ export const PerfSdrDashboard: React.FC<{ data: DashData; demo?: boolean }> = ({
   }, [preset, cFrom, cTo]);
 
   const filters: Filters = { from, to, sdrIds: selSdrs.length ? selSdrs : null };
-  const m: Metrics = useMemo(() => computeMetrics(data, filters), [data, from, to, selSdrs]);
+
+  // Ligações/conexões autoritativas via RPC get_perf_ligacoes (mesma fonte da tela Perf. SDR),
+  // porque o store só carrega as 2000 ligações mais recentes e subconta períodos longos.
+  // Fallback: se falhar/estiver em demo, usa a contagem do store.
+  const [ligBySdr, setLigBySdr] = useState<Record<string, { feitas: number; atendidas: number }> | undefined>(undefined);
+  useEffect(() => {
+    if (demo) { setLigBySdr(undefined); return; }
+    const pSdrs = (selSdrs.length ? selSdrs : sdrsAll.map((s) => s.id));
+    if (!pSdrs.length) { setLigBySdr(undefined); return; }
+    let alive = true;
+    (async () => {
+      try {
+        const { data, error } = await supabase.rpc("get_perf_ligacoes", { p_from: from, p_to: to, p_sdrs: pSdrs });
+        if (!alive || error || !Array.isArray(data)) return;
+        const map: Record<string, { feitas: number; atendidas: number }> = {};
+        for (const r of data as any[]) map[r.member_id] = { feitas: Number(r.feitas) || 0, atendidas: Number(r.atendidas) || 0 };
+        setLigBySdr(map);
+      } catch { /* mantém fallback do store */ }
+    })();
+    return () => { alive = false; };
+  }, [demo, from, to, selSdrs, sdrsAll]);
+
+  const m: Metrics = useMemo(() => computeMetrics(data, filters, ligBySdr), [data, from, to, selSdrs, ligBySdr]);
 
   // dados p/ o gráfico comparativo por SDR (barras agrupadas por etapa)
   const cmpData = useMemo(() => {
@@ -304,7 +327,7 @@ export const PerfSdrDashboard: React.FC<{ data: DashData; demo?: boolean }> = ({
 
       {/* LIGAÇÕES POR HORA — PIZZA */}
       <Section title="Ligações por hora" icon={<Phone size={14} className="text-[var(--color-v4-red)]" />}
-        hint="Fatia = hora do dia; vermelho mais forte = hora mais quente. Hover mostra volume e SDRs.">
+        hint="Fatia = hora do dia; vermelho mais forte = hora mais quente. Hover mostra volume e SDRs. (distribuição por hora usa as ligações recentes carregadas — os totais do funil vêm do get_perf_ligacoes)">
         <div className={card}>
           {m.hours.length === 0 ? (
             <div className="text-xs text-[var(--color-v4-text-muted)] py-8 text-center">Sem ligações no período.</div>
