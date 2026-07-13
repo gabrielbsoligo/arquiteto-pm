@@ -7,18 +7,33 @@ interface Props {
   reuniao: Reuniao;
   onConfirm: (show: boolean, closerConfirmadoId: string) => void;
   onClose: () => void;
+  /** Reagenda a reunião pra nova data (atualiza SalesHub + Google Calendar via rescheduleReuniao). */
+  onReagendar?: (dataISO: string) => void | Promise<void>;
 }
 
-export const ConfirmarReuniaoModal: React.FC<Props> = ({ reuniao, onConfirm, onClose }) => {
+export const ConfirmarReuniaoModal: React.FC<Props> = ({ reuniao, onConfirm, onClose, onReagendar }) => {
   const { members } = useAppStore();
   const closers = members.filter(m => (m.role === 'closer' || m.role === 'gestor') && m.active);
   const [closerConfirmadoId, setCloserConfirmadoId] = useState(reuniao.closer_id || '');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [reagendarMode, setReagendarMode] = useState(false);
+  const toLocalInput = (iso?: string) => {
+    if (!iso) return '';
+    const d = new Date(iso); const p = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+  };
+  const [novaData, setNovaData] = useState(toLocalInput(reuniao.data_reuniao));
 
   const handleConfirm = async (show: boolean) => {
     if (isProcessing || !closerConfirmadoId) return;
     setIsProcessing(true);
     onConfirm(show, closerConfirmadoId);
+  };
+
+  const handleReagendar = async () => {
+    if (isProcessing || !novaData || !onReagendar) return;
+    setIsProcessing(true);
+    try { await onReagendar(new Date(novaData).toISOString()); } finally { setIsProcessing(false); }
   };
 
   const inputClass = "w-full px-3 py-2 rounded-lg bg-[var(--color-v4-bg)] border border-[var(--color-v4-border)] text-white text-sm focus:outline-none focus:ring-1 focus:ring-[var(--color-v4-red)]";
@@ -80,9 +95,30 @@ export const ConfirmarReuniaoModal: React.FC<Props> = ({ reuniao, onConfirm, onC
             )}
           </div>
 
-          <p className="text-xs text-[var(--color-v4-text-muted)] text-center">A reunião aconteceu?</p>
+          {!reagendarMode && <p className="text-xs text-[var(--color-v4-text-muted)] text-center">A reunião aconteceu?</p>}
+
+          {onReagendar && (!reagendarMode ? (
+            <button onClick={() => setReagendarMode(true)}
+              className="w-full flex items-center justify-center gap-2 py-2 rounded-xl border border-[var(--color-v4-border)] text-[var(--color-v4-text-muted)] hover:text-white hover:border-[var(--color-v4-border-strong)] text-sm">
+              <Calendar size={14} /> Reagendar para outra data
+            </button>
+          ) : (
+            <div className="rounded-lg border border-yellow-500/30 bg-yellow-500/5 p-3 space-y-2">
+              <label className="block text-xs font-medium text-yellow-400">Nova data e hora</label>
+              <input type="datetime-local" className={inputClass} value={novaData} onChange={e => setNovaData(e.target.value)} />
+              <p className="text-[10px] text-[var(--color-v4-text-muted)]">Atualiza no SalesHub e no Google Calendar automaticamente.</p>
+              <div className="flex gap-2 pt-1">
+                <button onClick={() => setReagendarMode(false)} className="py-2 px-3 rounded-lg border border-[var(--color-v4-border)] text-[var(--color-v4-text-muted)] text-sm">Voltar</button>
+                <button onClick={handleReagendar} disabled={!novaData || isProcessing}
+                  className="flex-1 flex items-center justify-center gap-2 py-2 rounded-lg bg-yellow-500 hover:bg-yellow-400 disabled:opacity-30 text-black font-bold text-sm">
+                  <Calendar size={14} /> {isProcessing ? 'Reagendando...' : 'Confirmar reagendamento'}
+                </button>
+              </div>
+            </div>
+          ))}
         </div>
 
+        {!reagendarMode && (
         <div className="px-5 py-4 border-t border-[var(--color-v4-border)] flex gap-3">
           <button onClick={onClose} className="py-2.5 px-4 rounded-xl border border-[var(--color-v4-border)] text-[var(--color-v4-text-muted)] text-sm">Cancelar</button>
           <button onClick={() => handleConfirm(false)} disabled={!closerConfirmadoId || isProcessing}
@@ -94,6 +130,7 @@ export const ConfirmarReuniaoModal: React.FC<Props> = ({ reuniao, onConfirm, onC
             <Check size={14} /> {isProcessing ? '...' : 'Realizada'}
           </button>
         </div>
+        )}
       </div>
     </div>
   );

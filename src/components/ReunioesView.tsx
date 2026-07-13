@@ -230,6 +230,18 @@ export const ReunioesView: React.FC = () => {
     } finally { setIsProcessing(false); }
   };
 
+  // Reagenda a reunião do modal Confirmar: move a mesma reunião + sincroniza a agenda.
+  const handleReagendarConfirm = async (dataISO: string) => {
+    if (!confirmar) return;
+    try {
+      await rescheduleReuniao(confirmar, { data_reuniao: dataISO, closer_id: confirmar.closer_id || undefined });
+      toast.success('Reunião reagendada — SalesHub e agenda atualizados.');
+      setConfirmar(null);
+    } catch (e: any) {
+      toast.error(e.message || 'Falha ao reagendar');
+    }
+  };
+
   const handleConfirm = async (show: boolean, closerConfirmadoId: string) => {
     if (!confirmar) return;
     const reuniaoId = confirmar.id;
@@ -583,7 +595,7 @@ export const ReunioesView: React.FC = () => {
       )}
 
       {selectedLead && !showReplace && <AgendarReuniaoModal lead={selectedLead} onConfirm={handleAgendarConfirm} onClose={() => setSelectedLead(null)} />}
-      {confirmar && <ConfirmarReuniaoModal reuniao={confirmar} onConfirm={handleConfirm} onClose={() => setConfirmar(null)} />}
+      {confirmar && <ConfirmarReuniaoModal reuniao={confirmar} onConfirm={handleConfirm} onReagendar={handleReagendarConfirm} onClose={() => setConfirmar(null)} />}
       <ReuniaoEditModal reuniao={editar} onClose={() => setEditar(null)} />
       <RoletaConfigModal open={showRoleta} onClose={() => setShowRoleta(false)} />
       {feedbackDealId && (() => {
