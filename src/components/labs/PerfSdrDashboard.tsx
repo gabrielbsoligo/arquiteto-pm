@@ -158,6 +158,12 @@ export const PerfSdrDashboard: React.FC<{ data: DashData; demo?: boolean }> = ({
 
   const totalLbCusto = m.leadbrokerBySdr.reduce((a, x) => a + x.custo, 0);
 
+  // realizadas por closer (barra horizontal + hover com clientes/SDR)
+  const closerData = useMemo(
+    () => m.realizadasByCloser.map((c) => ({ closer: c.closer, Realizadas: c.count, _cli_Realizadas: c.clients })),
+    [m],
+  );
+
   // No-show empilhado por SDR × canal (p/ o gráfico)
   const nsCanaisLabels = useMemo(
     () => Array.from(new Set(m.noShow.list.map((c) => CANAL_LABEL[c.canal || "sem origem"] || c.canal || "sem origem"))),
@@ -322,6 +328,29 @@ export const PerfSdrDashboard: React.FC<{ data: DashData; demo?: boolean }> = ({
               </div>
             );
           })}
+        </div>
+      </Section>
+
+      {/* REUNIÕES REALIZADAS POR CLOSER */}
+      <Section title="Reuniões realizadas por Closer" icon={<CheckCircle2 size={14} className="text-[var(--color-v4-red)]" />}
+        hint="Pra onde o esforço dos SDRs vai: reuniões realizadas (compareceram) na mão de cada closer. Hover mostra cliente, SDR de origem e data.">
+        <div className={card}>
+          {m.realizadasByCloser.length === 0 ? (
+            <div className="text-xs text-[var(--color-v4-text-muted)] py-6 text-center">Sem reuniões realizadas no período.</div>
+          ) : (
+            <>
+              <div className="text-[11px] text-[var(--color-v4-text-muted)] mb-1">{m.totals.realizadas} realizada(s) no período · distribuídas por closer</div>
+              <ResponsiveContainer width="100%" height={Math.max(180, closerData.length * 54 + 40)}>
+                <BarChart layout="vertical" data={closerData} margin={{ top: 8, right: 30, left: 8, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={PAL.grid} horizontal={false} />
+                  <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11, fill: PAL.muted }} />
+                  <YAxis type="category" dataKey="closer" width={92} tick={{ fontSize: 12, fill: "#fff" }} />
+                  <Tooltip cursor={{ fill: "#ffffff10" }} content={<BarTip />} />
+                  <Bar dataKey="Realizadas" fill={PAL.red} radius={[0, 3, 3, 0]}><LabelList dataKey="Realizadas" position="right" fill={PAL.muted} fontSize={11} /></Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </>
+          )}
         </div>
       </Section>
 

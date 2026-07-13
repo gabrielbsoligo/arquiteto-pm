@@ -80,6 +80,8 @@ export interface Metrics {
   channels: ChannelRow[];
   leadbrokerBySdr: { name: string; qtd: number; custo: number; clients: ClientRef[] }[];
   fechadas: ClientRef[];
+  // reuniões realizadas agrupadas pelo closer efetivo (closer_confirmado_id || closer_id)
+  realizadasByCloser: { closer: string; count: number; clients: ClientRef[] }[];
   noShow: {
     total: number; // no-shows EM ABERTO (não recuperados)
     list: ClientRef[]; // cada no-show em aberto com empresa/sdr/canal/data (quando era pra acontecer)
@@ -232,6 +234,17 @@ export function computeMetrics(
   const leadbrokerBySdr = Object.values(lbBySdr).sort((a, b) => b.qtd - a.qtd);
   const fechadas = dealCli(closed).sort((a, b) => (b.valor || 0) - (a.valor || 0));
 
+  // reuniões realizadas por closer efetivo (mostra pra onde vai o esforço do SDR)
+  const closerMap: Record<string, { count: number; clients: ClientRef[] }> = {};
+  for (const r of reusInRange.filter(isReal)) {
+    const cid = r.closer_confirmado_id || r.closer_id;
+    const nm = cid ? nameById.get(cid) || "—" : "Sem closer";
+    const e = (closerMap[nm] ||= { count: 0, clients: [] });
+    e.count++;
+    e.clients.push({ empresa: r.empresa || "—", sdr: r.sdr_id ? nameById.get(r.sdr_id) : undefined, canal: canalOfReu(r), data: r.data_reuniao });
+  }
+  const realizadasByCloser = Object.entries(closerMap).map(([closer, v]) => ({ closer, count: v.count, clients: v.clients })).sort((a, b) => b.count - a.count);
+
   // ---------- NO SHOW: quantos, de quais canais, de qual SDR, quando era pra acontecer ----------
   const nsList = reuCli(reusInRange.filter(isOpenNoShow)).sort((a, b) => (b.data || "").localeCompare(a.data || ""));
   const nsCanalMap: Record<string, number> = {};
@@ -285,7 +298,7 @@ export function computeMetrics(
       color: v.total / maxH > 0.66 ? PAL.red : v.total / maxH > 0.33 ? PAL.redSoft : PAL.gray,
     }));
 
-  return { totals, funnel, convRates, sdrs, channels, leadbrokerBySdr, fechadas, noShow, hours };
+  return { totals, funnel, convRates, sdrs, channels, leadbrokerBySdr, fechadas, realizadasByCloser, noShow, hours };
 }
 
 // =============================================================
@@ -297,6 +310,11 @@ export function makeDemoData() {
   const members: TeamMember[] = names.map((n, i) => ({
     id: `sdr${i}`, name: n, email: `${n.toLowerCase()}@ruston.com`, role: "sdr", active: true, created_at: "2025-01-01",
   }));
+  const closerNames = ["Rafael", "Marina", "Thiago"];
+  const closers: TeamMember[] = closerNames.map((n, i) => ({
+    id: `cl${i}`, name: n, email: `${n.toLowerCase()}@ruston.com`, role: "closer", active: true, created_at: "2025-01-01",
+  }));
+  members.push(...closers);
   const canais = ["leadbroker", "blackbox", "outbound", "recomendacao", "indicacao"];
   const empresas = ["Alfa Ltda", "Beta SA", "Gamma Corp", "Delta ME", "Epsilon Tech", "Zeta Foods", "Eta Log", "Theta Farma", "Iota Auto", "Kappa Bank", "Lambda Wear", "Mu Solar", "Nu Games", "Xi Health", "Omicron Edu", "Pi Retail", "Rho Build", "Sigma Med", "Tau Cloud", "Upsilon Agro"];
   const today = new Date();
@@ -328,7 +346,7 @@ export function makeDemoData() {
     const roll = Math.random();
     const realizada = roll < 0.72;             // 72% já foram confirmadas (realizada=true)
     const show = realizada ? roll < 0.55 : false; // dessas, compareceram; senão no-show. pendente fica !realizada
-    reunioes.push({ id: `r${id++}`, lead_id: leadId, sdr_id: sdr.id, canal, empresa: emp, tipo: "primeira_call",
+    reunioes.push({ id: `r${id++}`, lead_id: leadId, sdr_id: sdr.id, closer_id: pick(closers).id, canal, empresa: emp, tipo: "primeira_call",
       data_reuniao: `${dr}T14:00:00`, realizada, show, created_at: dr });
     if (realizada && !show) {
       // destino do no-show: parte reagenda, parte fecha mesmo assim, parte fica em aberto
@@ -336,7 +354,7 @@ export function makeDemoData() {
       if (rr < 0.45) {
         const dr2 = dstr(Math.floor(daysAgo / 2)); // reunião mais nova (reagendado)
         const rz2 = Math.random() < 0.6, sh2 = rz2 && Math.random() < 0.7;
-        reunioes.push({ id: `r${id++}`, lead_id: leadId, sdr_id: sdr.id, canal, empresa: emp, tipo: "retorno",
+        reunioes.push({ id: `r${id++}`, lead_id: leadId, sdr_id: sdr.id, closer_id: pick(closers).id, canal, empresa: emp, tipo: "retorno",
           data_reuniao: `${dr2}T15:00:00`, realizada: rz2, show: sh2, created_at: dr2 });
       } else if (rr < 0.6) {
         deals.push({ id: `d${id++}`, lead_id: leadId, empresa: emp, sdr_id: sdr.id, status: "contrato_assinado",
