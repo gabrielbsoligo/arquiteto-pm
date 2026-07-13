@@ -418,11 +418,44 @@ export const PerfSdrDashboard: React.FC<{ data: DashData; demo?: boolean }> = ({
 
       {/* NO SHOW — quantos, de quais canais, de qual SDR, quando era pra acontecer */}
       <Section title="No Show — quem não compareceu" icon={<UserX size={14} className="text-[var(--color-v4-red)]" />}
-        hint="No-show em aberto: reunião sem comparecimento e que NÃO recuperou (não fechou contrato nem foi reagendada). “Era pra acontecer” = data da reunião. Hover mostra os clientes.">
-        {m.noShow.total === 0 ? (
-          <div className={card}><div className="text-xs text-[var(--color-v4-text-muted)] py-6 text-center">Nenhum no-show em aberto no período. 🎉</div></div>
+        hint="Destino de todo cliente que deu no-show: reagendou (voltou pra agenda), fechou mesmo assim, ou continua em aberto. “Era pra acontecer” = data da reunião.">
+        {m.noShow.breakdown.totalClientes === 0 ? (
+          <div className={card}><div className="text-xs text-[var(--color-v4-text-muted)] py-6 text-center">Nenhum no-show no período. 🎉</div></div>
         ) : (
           <>
+            {(() => {
+              const bd = m.noShow.breakdown; const T = bd.totalClientes || 1;
+              const segs = [
+                { label: "Reagendados", v: bd.reagendados, color: "#f59e0b" },
+                { label: "Fecharam mesmo assim", v: bd.fechados, color: "#22c55e" },
+                { label: "Em aberto", v: bd.emAberto, color: PAL.red },
+              ].map((s) => ({ ...s, pct: Math.round((100 * s.v) / T) }));
+              const pctR = Math.round((100 * bd.reagendados) / T);
+              return (
+                <div className={`${card} mb-3`}>
+                  <div className="flex flex-wrap items-baseline justify-between gap-2 mb-2">
+                    <div className="text-[12px] text-white font-semibold">Destino dos no-shows — {bd.totalClientes} cliente(s) deram no-show no período</div>
+                    <div className="text-[12px]"><span className="font-bold text-lg" style={{ color: "#f59e0b" }}>{pctR}%</span> <span className="text-[10px] text-[var(--color-v4-text-muted)]">reagendaram</span></div>
+                  </div>
+                  <div className="flex h-6 rounded overflow-hidden bg-[var(--color-v4-surface)]">
+                    {segs.filter((s) => s.v > 0).map((s) => (
+                      <div key={s.label} className="h-full flex items-center justify-center text-[10px] font-bold text-white" style={{ width: `${s.pct}%`, background: s.color }} title={`${s.label}: ${s.v} (${s.pct}%)`}>{s.pct >= 10 ? `${s.pct}%` : ""}</div>
+                    ))}
+                  </div>
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2">
+                    {segs.map((s) => (
+                      <span key={s.label} className="inline-flex items-center gap-1.5 text-[11px] text-[var(--color-v4-text-muted)]">
+                        <span className="w-2.5 h-2.5 rounded-full" style={{ background: s.color }} />{s.label}: <span className="text-white font-semibold">{s.v}</span> ({s.pct}%)
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+            {m.noShow.total === 0 && (
+              <div className={card}><div className="text-xs text-emerald-400 py-4 text-center">Todos os no-shows do período já recuperaram (reagendaram ou fecharam). ✓</div></div>
+            )}
+            {m.noShow.total > 0 && (<>
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-3">
               <div className={card}>
                 <div className="text-[11px] text-[var(--color-v4-text-muted)] flex items-center gap-1"><UserX size={12} /> Total no-show</div>
@@ -474,6 +507,7 @@ export const PerfSdrDashboard: React.FC<{ data: DashData; demo?: boolean }> = ({
                 </table>
               </div>
             </div>
+            </>)}
           </>
         )}
       </Section>

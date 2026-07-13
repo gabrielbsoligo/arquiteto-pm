@@ -81,10 +81,12 @@ export interface Metrics {
   leadbrokerBySdr: { name: string; qtd: number; custo: number; clients: ClientRef[] }[];
   fechadas: ClientRef[];
   noShow: {
-    total: number;
-    list: ClientRef[]; // cada no-show com empresa/sdr/canal/data (quando era pra acontecer)
+    total: number; // no-shows EM ABERTO (não recuperados)
+    list: ClientRef[]; // cada no-show em aberto com empresa/sdr/canal/data (quando era pra acontecer)
     byCanal: { canal: string; label: string; count: number }[];
     bySdr: { name: string; count: number }[];
+    // destino de TODOS os clientes que deram no-show no período (soma = totalClientes):
+    breakdown: { totalClientes: number; reagendados: number; fechados: number; emAberto: number };
   };
   hours: HourSlice[];
 }
@@ -236,11 +238,27 @@ export function computeMetrics(
     const sk = c.sdr || "Sem SDR";
     nsSdrMap[sk] = (nsSdrMap[sk] || 0) + 1;
   }
+  // destino de TODO cliente (lead) que deu no-show no período: reagendou / fechou / continua em aberto
+  const nsLatestByLead = new Map<string, string>();
+  for (const r of reunioes) {
+    if (!isNoShow(r) || !r.lead_id || !okSdr(r.sdr_id) || !inRange(day(r.data_reuniao), f.from, f.to)) continue;
+    const cur = nsLatestByLead.get(r.lead_id);
+    if (!cur || (r.data_reuniao || "") > cur) nsLatestByLead.set(r.lead_id, r.data_reuniao || "");
+  }
+  let nsReagendados = 0, nsFechados = 0, nsEmAberto = 0;
+  for (const [lid, latestNS] of nsLatestByLead) {
+    const reagendou = reunioes.some((x) => x.lead_id === lid && (x.data_reuniao || "") > latestNS); // marcou reunião nova depois do último no-show
+    if (reagendou) nsReagendados++;
+    else if (wonLeadIds.has(lid)) nsFechados++;
+    else nsEmAberto++;
+  }
+
   const noShow = {
     total: nsList.length,
     list: nsList,
     byCanal: Object.entries(nsCanalMap).map(([canal, count]) => ({ canal, label: CANAL_LABEL[canal] || canal, count })).sort((a, b) => b.count - a.count),
     bySdr: Object.entries(nsSdrMap).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count),
+    breakdown: { totalClientes: nsLatestByLead.size, reagendados: nsReagendados, fechados: nsFechados, emAberto: nsEmAberto },
   };
 
   // ---------- ligações por hora (pizza) ----------
@@ -299,19 +317,33 @@ export function makeDemoData() {
   }
   for (let i = 0; i < 70; i++) {
     const sdr = pick(members); const canal = pick(canais); const emp = pick(empresas);
-    const dr = dstr(rnd(30));
+    const leadId = `rl${i}`;
+    const daysAgo = rnd(30);
+    const dr = dstr(daysAgo);
     // 3 estados fiéis ao modelo: realizada (realizada&&show), no-show (realizada&&!show), pendente (!realizada)
     const roll = Math.random();
     const realizada = roll < 0.72;             // 72% já foram confirmadas (realizada=true)
     const show = realizada ? roll < 0.55 : false; // dessas, compareceram; senão no-show. pendente fica !realizada
-    reunioes.push({ id: `r${id++}`, sdr_id: sdr.id, canal, empresa: emp, tipo: "primeira_call",
+    reunioes.push({ id: `r${id++}`, lead_id: leadId, sdr_id: sdr.id, canal, empresa: emp, tipo: "primeira_call",
       data_reuniao: `${dr}T14:00:00`, realizada, show, created_at: dr });
+    if (realizada && !show) {
+      // destino do no-show: parte reagenda, parte fecha mesmo assim, parte fica em aberto
+      const rr = Math.random();
+      if (rr < 0.45) {
+        const dr2 = dstr(Math.floor(daysAgo / 2)); // reunião mais nova (reagendado)
+        const rz2 = Math.random() < 0.6, sh2 = rz2 && Math.random() < 0.7;
+        reunioes.push({ id: `r${id++}`, lead_id: leadId, sdr_id: sdr.id, canal, empresa: emp, tipo: "retorno",
+          data_reuniao: `${dr2}T15:00:00`, realizada: rz2, show: sh2, created_at: dr2 });
+      } else if (rr < 0.6) {
+        deals.push({ id: `d${id++}`, lead_id: leadId, empresa: emp, sdr_id: sdr.id, status: "contrato_assinado",
+          origem: canal, valor_mrr: 3000 + rnd(12) * 500, valor_ot: rnd(8) * 2000, valor_escopo: 0, valor_recorrente: 0,
+          produtos_ot: [], produtos_mrr: [], data_fechamento: dstr(Math.floor(daysAgo / 2)), data_call: dr, created_at: dr, updated_at: dr });
+      }
+    }
     if (realizada && show && Math.random() < 0.45) {
-      const df = dr;
-      deals.push({ id: `d${id++}`, empresa: emp, sdr_id: sdr.id, status: "contrato_assinado",
-        origem: canal, valor_mrr: 3000 + rnd(12) * 500, valor_ot: rnd(8) * 2000,
-        valor_escopo: 0, valor_recorrente: 0, produtos_ot: [], produtos_mrr: [],
-        data_fechamento: df, data_call: df, created_at: df, updated_at: df });
+      deals.push({ id: `d${id++}`, lead_id: leadId, empresa: emp, sdr_id: sdr.id, status: "contrato_assinado",
+        origem: canal, valor_mrr: 3000 + rnd(12) * 500, valor_ot: rnd(8) * 2000, valor_escopo: 0, valor_recorrente: 0,
+        produtos_ot: [], produtos_mrr: [], data_fechamento: dr, data_call: dr, created_at: dr, updated_at: dr });
     }
   }
   for (let i = 0; i < 800; i++) {
