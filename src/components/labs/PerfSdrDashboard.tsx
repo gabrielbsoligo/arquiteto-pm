@@ -219,20 +219,34 @@ export const PerfSdrDashboard: React.FC<{ data: DashData; demo?: boolean }> = ({
           <FunnelChart stages={m.funnel} noshow={{ value: m.totals.noshow, pct: m.convRates[4].pct, clients: m.sdrs.flatMap((s) => s.clientsNo) }} />
         </div>
         <div className={card}>
-          <div className="text-[11px] text-[var(--color-v4-text-muted)] mb-3">Conversão etapa → etapa</div>
-          <div className="space-y-3">
-            {m.convRates.map((r) => (
-              <div key={r.label}>
-                <div className="flex items-center justify-between text-[12px] mb-1">
-                  <span className="text-white">{r.from} → {r.to}</span>
-                  <span className="font-semibold" style={{ color: r.label === "No Show" ? PAL.gray : PAL.red }}>{r.pct != null ? `${r.pct}%` : "—"}</span>
+          <div className="text-[11px] text-[var(--color-v4-text-muted)] mb-3">Conversão etapa → etapa <span className="opacity-70">· realizado vs meta ideal</span></div>
+          <div className="space-y-3.5">
+            {m.convRates.map((r) => {
+              const has = r.pct != null;
+              const ok = has && (r.dir === "up" ? (r.pct as number) >= r.ideal : (r.pct as number) <= r.ideal);
+              const col = !has ? PAL.gray : ok ? "#22c55e" : PAL.red;
+              const gap = has ? (r.dir === "up" ? (r.pct as number) - r.ideal : r.ideal - (r.pct as number)) : null; // >0 = melhor que a meta
+              return (
+                <div key={r.label}>
+                  <div className="flex items-baseline justify-between mb-1">
+                    <span className="text-[12px] text-white font-medium">{r.name}<span className="text-[10px] text-[var(--color-v4-text-muted)] font-normal ml-1.5">{r.from} → {r.to}</span></span>
+                    <span className="text-right whitespace-nowrap">
+                      <span className="text-[13px] font-bold" style={{ color: col }}>{has ? `${r.pct}%` : "—"}</span>
+                      <span className="text-[10px] text-[var(--color-v4-text-muted)] ml-1">meta {r.dir === "down" ? "≤" : "≥"}{r.ideal}%</span>
+                    </span>
+                  </div>
+                  <div className="relative h-2.5 rounded bg-[var(--color-v4-surface)] overflow-hidden">
+                    <div className="h-full rounded" style={{ width: `${Math.min(100, r.pct ?? 0)}%`, background: col }} />
+                    <div className="absolute top-[-1px] bottom-[-1px] w-[2px] bg-white" style={{ left: `${Math.min(100, r.ideal)}%` }} title={`meta ${r.ideal}%`} />
+                  </div>
+                  <div className="text-[10px] mt-0.5" style={{ color: gap == null ? PAL.gray : gap >= 0 ? "#22c55e" : PAL.red }}>
+                    {gap == null ? "sem dados" : gap === 0 ? "na meta ✓" : gap > 0 ? `${Math.abs(gap)}pp melhor que a meta ✓` : `${Math.abs(gap)}pp ${r.dir === "up" ? "abaixo" : "acima"} da meta`}
+                  </div>
                 </div>
-                <div className="h-2 rounded bg-[var(--color-v4-surface)] overflow-hidden">
-                  <div className="h-full rounded" style={{ width: `${Math.min(100, r.pct ?? 0)}%`, background: r.label === "No Show" ? PAL.grayDark : PAL.red }} />
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
+          <div className="text-[9px] text-[var(--color-v4-text-muted)] mt-3 opacity-70">Barra branca = meta ideal. Verde = dentro/melhor que a meta; vermelho = fora.</div>
         </div>
       </div>
 

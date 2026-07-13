@@ -75,7 +75,7 @@ export interface HourSlice { hora: number; label: string; total: number; bySdr: 
 export interface Metrics {
   totals: { ligacoes: number; conexoes: number; agendadas: number; realizadas: number; fechadas: number; noshow: number };
   funnel: FunnelStage[];
-  convRates: { label: string; from: string; to: string; pct: number | null }[];
+  convRates: { label: string; name: string; from: string; to: string; pct: number | null; ideal: number; dir: "up" | "down" }[];
   sdrs: SdrRow[];
   channels: ChannelRow[];
   leadbrokerBySdr: { name: string; qtd: number; custo: number; clients: ClientRef[] }[];
@@ -170,12 +170,13 @@ export function computeMetrics(
   }));
 
   const pct = (a: number, b: number) => (b > 0 ? Math.round((100 * a) / b) : null);
-  const convRates = [
-    { label: "Conexão", from: "Ligações", to: "Conexões", pct: pct(totals.conexoes, totals.ligacoes) },
-    { label: "Agendamento", from: "Conexões", to: "Agendadas", pct: pct(totals.agendadas, totals.conexoes) },
-    { label: "Comparecimento", from: "Agendadas", to: "Realizadas", pct: pct(totals.realizadas, totals.agendadas) },
-    { label: "Fechamento", from: "Realizadas", to: "Fechadas", pct: pct(totals.fechadas, totals.realizadas) },
-    { label: "No Show", from: "Agendadas", to: "No Show", pct: pct(totals.noshow, totals.agendadas) },
+  // metas ideais (benchmark) por etapa. dir=up → maior é melhor; dir=down → menor é melhor.
+  const convRates: Metrics["convRates"] = [
+    { label: "Conexão", name: "Connect Rate", from: "Ligações", to: "Conexões", pct: pct(totals.conexoes, totals.ligacoes), ideal: 15, dir: "up" },
+    { label: "Agendamento", name: "Booking Rate", from: "Conexões", to: "Agendamentos", pct: pct(totals.agendadas, totals.conexoes), ideal: 20, dir: "up" },
+    { label: "Comparecimento", name: "Show Rate", from: "Agendamentos", to: "Realizadas", pct: pct(totals.realizadas, totals.agendadas), ideal: 80, dir: "up" },
+    { label: "Fechamento", name: "Win Rate", from: "Realizadas", to: "Fechadas", pct: pct(totals.fechadas, totals.realizadas), ideal: 30, dir: "up" },
+    { label: "No Show", name: "No Show Rate", from: "Agendamentos", to: "No Show", pct: pct(totals.noshow, totals.agendadas), ideal: 15, dir: "down" },
   ];
 
   // ---------- por canal ----------
