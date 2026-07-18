@@ -182,11 +182,11 @@ export const ProspeccaoHub: React.FC<HubProps> = ({ teamMembers, closers = [] })
     const byId = new Map(redistribuidos.map((l) => [l.id, l]));
     // 1) marca como enviado na Prospecção  2) grava DIRETO no Hub (entrega garantida)
     persist(leads.map((l) => byId.get(l.id) || l));
-    pushToHub(redistribuidos);
+    const res = pushToHub(redistribuidos);
     setSendOpen(false);
     const cont: Record<string, number> = {};
     redistribuidos.forEach((l) => { if (l.bdr) cont[l.bdr] = (cont[l.bdr] || 0) + 1; });
-    setBanner({ ok: true, msg: `${pendentes.length} empresa(s) enviada(s) ao Hub Outbound · divisão qualificada: ${Object.entries(cont).map(([b, n]) => `${b}: ${n}`).join(" · ")}` });
+    setBanner({ ok: true, msg: `${pendentes.length} empresa(s) enviada(s) → Hub Outbound agora com ${res.total} lead(s) (${res.added} novo(s)). Abra a aba Hub Outbound. · divisão: ${Object.entries(cont).map(([b, n]) => `${b}: ${n}`).join(" · ")}` });
   };
 
   // simulação local: só atualiza o Hub (localStorage). O funil e a agenda abaixo refletem na hora.

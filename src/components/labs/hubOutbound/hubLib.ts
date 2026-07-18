@@ -498,20 +498,19 @@ export function saveLeads(leads: ProspLead[]): void {
  * Hub (não sobrescreve etapa/atividades) e tira os ids do "descartados".
  * Retorna quantos leads novos foram adicionados.
  */
-export function pushToHub(prospLeads: any[]): number {
-  try {
-    const hubById = new Map<string, any>(readRaw(KEY).map((l) => [l.id, l]));
-    const dismissed = loadDismissed();
-    let added = 0;
-    for (const p of prospLeads) {
-      if (!p || !p.id) continue;
-      dismissed.delete(p.id);                 // reenvio explícito sempre entrega
-      if (!hubById.has(p.id)) { hubById.set(p.id, p); added++; } // novo → entra; existente → mantém trabalho do Hub
-    }
-    saveDismissed(dismissed);
-    saveLeads(Array.from(hubById.values()).map(normalizeLead));
-    return added;
-  } catch { return 0; }
+export function pushToHub(prospLeads: any[]): { added: number; total: number } {
+  const hubById = new Map<string, any>(readRaw(KEY).map((l) => [l.id, l]));
+  const dismissed = loadDismissed();
+  let added = 0;
+  for (const p of prospLeads) {
+    if (!p || !p.id) continue;
+    dismissed.delete(p.id);                 // reenvio explícito sempre entrega
+    if (!hubById.has(p.id)) { hubById.set(p.id, p); added++; } // novo → entra; existente → mantém trabalho do Hub
+  }
+  saveDismissed(dismissed);
+  const merged = Array.from(hubById.values()).map(normalizeLead);
+  saveLeads(merged);
+  return { added, total: merged.length };
 }
 
 // ---------------- distribuição entre BDRs ----------------
