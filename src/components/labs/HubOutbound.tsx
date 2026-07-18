@@ -331,7 +331,15 @@ const KanbanBoard: React.FC<{ leads: ProspLead[]; onlyStatus?: Status | null; on
   const cols = onlyStatus ? [onlyStatus] : STATUS_ORDER;
   return (
     <DragDropContext onDragEnd={onDragEnd}>
-      <div className="flex gap-3 overflow-x-auto pb-3">
+      <style>{`
+        .v4-kanban-scroll{ overflow-x:scroll; overflow-y:auto; max-height:calc(100vh - 360px); min-height:220px; scrollbar-width:auto; scrollbar-color:var(--color-v4-red) var(--color-v4-surface); }
+        .v4-kanban-scroll::-webkit-scrollbar{ height:14px; width:12px; }
+        .v4-kanban-scroll::-webkit-scrollbar-track{ background:var(--color-v4-surface); border-radius:8px; }
+        .v4-kanban-scroll::-webkit-scrollbar-thumb{ background:var(--color-v4-red); border-radius:8px; border:3px solid var(--color-v4-surface); }
+        .v4-kanban-scroll::-webkit-scrollbar-thumb:hover{ background:#ff5a67; }
+        .v4-kanban-scroll::-webkit-scrollbar-corner{ background:var(--color-v4-surface); }
+      `}</style>
+      <div className="v4-kanban-scroll flex gap-3 pb-2 items-start">
         {cols.map((s) => {
           const col = byStatus(s);
           return (
