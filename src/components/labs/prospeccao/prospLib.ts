@@ -202,12 +202,21 @@ export function whatsappLink(phone: string): string {
 
 // ---------------- persistência (localStorage) ----------------
 const KEY = "v4_prospeccao_leads_v1";
+const VALID_STATUS = new Set(["novo", "abordando", "conexao", "agendado", "realizado", "fechado"]);
+const STATUS_MIGRA: Record<string, ProspLead["status"]> = { investigando: "abordando", abordado: "abordando", reuniao: "agendado", descartado: "novo" };
 export function loadLeads(): ProspLead[] {
   try {
     const raw = localStorage.getItem(KEY);
     const arr = raw ? (JSON.parse(raw) as ProspLead[]) : [];
-    // backfill: leads antigos salvos sem nota recebem a maturidade automática
-    return arr.map((l) => (l.maturidade && l.maturidade > 0 ? l : { ...l, maturidade: autoMaturidade(l) }));
+    // backfill de leads antigos: nicho ausente, status legado e nota zerada
+    return arr.map((l) => ({
+      ...l,
+      nicho: l.nicho || "Mercado Imobiliário / Incorporadoras",
+      abordagem: l.abordagem || "",
+      notas: l.notas || "",
+      status: VALID_STATUS.has(l.status) ? l.status : (STATUS_MIGRA[l.status as string] || "novo"),
+      maturidade: l.maturidade && l.maturidade > 0 ? l.maturidade : autoMaturidade(l),
+    }));
   } catch { return []; }
 }
 export function saveLeads(leads: ProspLead[]): void {

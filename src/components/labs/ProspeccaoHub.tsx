@@ -441,7 +441,7 @@ const LeadPanel: React.FC<{ lead: ProspLead; closers: Member[]; onClose: () => v
               <Stars value={lead.maturidade} onChange={(v) => onUpdate({ maturidade: v })} />
             </div>
             <button onClick={genApproach} className="mt-3 w-full inline-flex items-center justify-center gap-2 py-2.5 rounded-lg text-white text-sm font-bold" style={{ background: RED }}>
-              <Sparkles size={15} /> Gerar Abordagem Inteligente ({lead.nicho.split(" ")[0]})
+              <Sparkles size={15} /> Gerar Abordagem Inteligente ({(lead.nicho || "Nicho").split(" ")[0]})
             </button>
             {lead.abordagem && (
               <div className="mt-3 relative">
