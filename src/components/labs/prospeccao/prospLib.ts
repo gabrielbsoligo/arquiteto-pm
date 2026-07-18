@@ -29,12 +29,15 @@ export interface ProspLead {
   linkedin: string;
   youtube: string;
   // operacional
-  bdr: string | null;
-  maturidade: number; // 0 = não avaliado; 1..5
+  bdr: string | null;   // dono/responsável da lista
+  nicho: string;        // nicho da lista (ex.: "Mercado Imobiliário / Incorporadoras")
+  maturidade: number;   // 1..5 — presença digital (proxy automático)
   abordagem: string;
-  status: "novo" | "investigando" | "abordado" | "reuniao" | "descartado";
+  status: "novo" | "abordando" | "conexao" | "agendado" | "realizado" | "fechado";
+  // agendamento (preenchido quando status = agendado)
+  dataReuniao?: string; closerId?: string; closerNome?: string; canal?: string;
   notas: string;
-  batch: string; // rótulo do lote de upload
+  batch: string;        // rótulo do lote de upload
   createdAt: string;
 }
 
@@ -44,8 +47,20 @@ export const LEMIT_COLUNAS = [
 ];
 
 export const STATUS_LABELS: Record<ProspLead["status"], string> = {
-  novo: "Novo", investigando: "Investigando", abordado: "Abordado", reuniao: "Reunião", descartado: "Descartado",
+  novo: "A abordar", abordando: "Abordando", conexao: "Conexão", agendado: "Agendado", realizado: "Realizado", fechado: "Fechado",
 };
+export const STATUS_ORDER: ProspLead["status"][] = ["novo", "abordando", "conexao", "agendado", "realizado", "fechado"];
+
+// Mapeamento (produção): status da Prospecção → etapa do lead na tela Leads do SalesHub.
+export const LEAD_ETAPA_MAP: Record<string, string> = {
+  abordando: "em_follow", conexao: "em_follow", agendado: "reuniao_marcada", realizado: "reuniao_marcada", fechado: "reuniao_realizada",
+};
+
+// Nichos-preset (o usuário pode adicionar; começa com o imobiliário).
+export const NICHOS = [
+  "Mercado Imobiliário / Incorporadoras", "Varejo / E-commerce", "Serviços B2B", "Saúde / Clínicas",
+  "Educação", "Indústria", "Alimentação / Food Service", "Automotivo", "Outro",
+];
 
 // normaliza header: minúsculo, sem acento, sem pontuação → facilita casar variações
 const DIACRITICS = new RegExp("[\\u0300-\\u036f]", "g");
@@ -85,7 +100,7 @@ function buildHeaderMap(headers: string[]): Partial<Record<keyof typeof FIELD_AL
 export interface ParseResult { leads: ProspLead[]; matched: string[]; missing: string[]; rows: number; }
 
 /** Lê um File (CSV ou XLS/XLSX) e devolve os leads mapeados. */
-export async function parseFile(file: File, batch: string): Promise<ParseResult> {
+export async function parseFile(file: File, batch: string, nicho = "", owner: string | null = null): Promise<ParseResult> {
   const buf = await file.arrayBuffer();
   const wb = XLSX.read(buf, { type: "array" });
   const ws = wb.Sheets[wb.SheetNames[0]];
@@ -110,7 +125,7 @@ export async function parseFile(file: File, batch: string): Promise<ParseResult>
       cidade: get(row, "cidade"), estado: get(row, "estado"),
       instagram: get(row, "instagram"), facebook: get(row, "facebook"),
       linkedin: get(row, "linkedin"), youtube: get(row, "youtube"),
-      bdr: null, maturidade: 0, abordagem: "", status: "novo", notas: "", batch, createdAt: new Date().toISOString(),
+      bdr: owner, nicho, maturidade: 0, abordagem: "", status: "novo", notas: "", batch, createdAt: new Date().toISOString(),
     };
     lead.maturidade = autoMaturidade(lead); // nota automática inicial (norte de prioridade)
     leads.push(lead);
@@ -173,6 +188,12 @@ export function callLink(phone: string): string {
   const full = d.length >= 11 && !d.startsWith("55") ? `55${d}` : d;
   return `api4com://${full}`;
 }
+/** Link `tel:` (abre o discador/softphone padrão — funciona sem depender do protocolo do app). */
+export function telLink(phone: string): string {
+  const d = onlyDigits(phone);
+  const full = d.length >= 11 && !d.startsWith("55") ? `55${d}` : d;
+  return `tel:+${full}`;
+}
 export function whatsappLink(phone: string): string {
   const d = onlyDigits(phone);
   const full = d.length >= 11 && !d.startsWith("55") ? `55${d}` : d;
@@ -199,40 +220,78 @@ export function distribute(leads: ProspLead[], bdrs: string[]): ProspLead[] {
   return leads.map((l, i) => (l.bdr ? l : { ...l, bdr: bdrs[i % bdrs.length] }));
 }
 
-// ---------------- gerador de abordagem (regras; trocável por LLM) ----------------
+// ---------------- gerador de abordagem (regras por nicho + gaps; trocável por LLM) ----------------
+interface NichoInfo { label: string; dores: [string, string, string]; prova: string }
+const NICHO_MAP: Record<string, NichoInfo> = {
+  imobiliario: {
+    label: "incorporadoras e mercado imobiliário",
+    dores: [
+      "estruturar a geração de leads qualificados pros lançamentos e reduzir o custo por lead",
+      "acelerar a velocidade de vendas e girar o estoque de unidades com um funil previsível",
+      "escalar a captação com eficiência de mídia (ROI) e autoridade de marca pro comprador de alto ticket",
+    ],
+    prova: "temos cases de incorporadoras que encheram o funil de compradores qualificados e aceleraram a venda de estoque",
+  },
+  varejo: {
+    label: "varejo e e-commerce",
+    dores: ["estruturar tráfego e recuperação de carrinho pra vender todo dia", "aumentar a recorrência e o ticket médio com CRM e retenção", "escalar as vendas online com ROI positivo e previsível"],
+    prova: "ajudamos varejos a escalar vendas online com ROI positivo",
+  },
+  saude: {
+    label: "clínicas e saúde",
+    dores: ["encher a agenda com pacientes qualificados da região", "reduzir no-show e aumentar recompra/retorno", "construir autoridade e prova social que gerem confiança"],
+    prova: "temos clínicas que lotaram a agenda com pacientes da região",
+  },
+  servicos: {
+    label: "serviços B2B",
+    dores: ["gerar reuniões qualificadas de forma previsível (outbound + inbound)", "encurtar o ciclo de vendas com nutrição e prova de autoridade", "escalar a aquisição com CAC sob controle"],
+    prova: "geramos pipeline previsível de reuniões qualificadas pra empresas B2B",
+  },
+  generico: {
+    label: "empresas como a de vocês",
+    dores: ["estruturar a aquisição de clientes de forma previsível (tráfego, funil e conversão)", "profissionalizar o que já roda e destravar o próximo nível de crescimento", "escalar com previsibilidade e reduzir o custo de aquisição"],
+    prova: "ajudamos empresas a crescer com marketing e vendas por performance",
+  },
+};
+function resolveNicho(nicho: string): NichoInfo {
+  const n = (nicho || "").toLowerCase();
+  if (/imob|incorpor|constru/.test(n)) return NICHO_MAP.imobiliario;
+  if (/varej|commerce|loja|ecom/.test(n)) return NICHO_MAP.varejo;
+  if (/saud|saúde|clinic|clínic|odont|estetic/.test(n)) return NICHO_MAP.saude;
+  if (/b2b|servi/.test(n)) return NICHO_MAP.servicos;
+  return NICHO_MAP.generico;
+}
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
 export function generateApproach(lead: ProspLead): string {
-  const nome = lead.socio1?.split(" ")[0] || "tudo bem";
+  const nome = lead.socio1?.trim().split(" ")[0] || "tudo bem";
   const empresa = lead.empresa || "sua empresa";
   const m = lead.maturidade;
-  const canais: string[] = [];
-  if (lead.instagram) canais.push("Instagram");
-  if (lead.site) canais.push("site");
-  if (lead.linkedin) canais.push("LinkedIn");
-  const temPresenca = canais.length ? `Vi a presença de vocês no ${canais.join(" e ")}` : "Dei uma pesquisada sobre a empresa";
+  const ni = resolveNicho(lead.nicho);
 
-  let diagnostico: string, gancho: string;
-  if (m <= 2 && m > 0) {
-    diagnostico = "percebi que ainda há bastante espaço pra estruturar a aquisição de clientes de forma previsível (tráfego, funil e conversão)";
-    gancho = "montar uma base sólida de geração de demanda que traga leads qualificados todo mês";
-  } else if (m === 3) {
-    diagnostico = "notei que já existe uma operação rodando, mas com pontos claros de otimização em conversão e mensuração de resultado";
-    gancho = "destravar o próximo nível de crescimento profissionalizando o que já existe";
-  } else if (m >= 4) {
-    diagnostico = "vi uma operação madura — o foco aqui seria escala, eficiência de investimento (ROI) e canais novos";
-    gancho = "escalar com previsibilidade e reduzir o custo de aquisição";
-  } else {
-    diagnostico = "queria entender melhor o momento de vocês em marketing e vendas";
-    gancho = "identificar as maiores oportunidades de crescimento pro momento atual";
-  }
+  const presentes: string[] = [];
+  const faltando: string[] = [];
+  ([["site", lead.site], ["Instagram", lead.instagram], ["LinkedIn", lead.linkedin], ["YouTube", lead.youtube]] as [string, string][])
+    .forEach(([lbl, v]) => (v ? presentes : faltando).push(lbl));
+
+  const obs = presentes.length
+    ? `dei uma olhada ${presentes.length > 1 ? "nos canais" : "no"} ${presentes.join(", ")} de vocês`
+    : `pesquisei sobre a ${empresa}`;
+  const gap = faltando.length
+    ? ` e vi que dá pra explorar bem mais ${faltando.length > 2 ? "a presença digital de vocês" : faltando.join(" e ")} pra atrair mais cliente`
+    : ", e dá pra tirar muito mais resultado do que já existe";
+
+  // dor puxa pela maturidade: baixa=fundação, média=otimização, alta=escala
+  const dor = ni.dores[m <= 2 ? 0 : m === 3 ? 1 : 2];
 
   return [
-    `Olá ${nome}, tudo bem? Aqui é da V4 Company (assessoria de marketing e vendas por performance).`,
+    `Oi ${nome}, tudo certo? Aqui é da V4 Company — assessoria de marketing e vendas por performance.`,
     ``,
-    `${temPresenca} da ${empresa}${lead.cidade ? ` aí em ${lead.cidade}` : ""} e ${diagnostico}.`,
+    `Atuo bastante com ${ni.label}, ${obs}${lead.cidade ? ` aí de ${lead.cidade}` : ""}${gap}.`,
     ``,
-    `Trabalhamos com ${empresa.length ? "empresas como a de vocês" : "empresas"} justamente pra ${gancho} — sempre com metas e ROI acordados.`,
+    `O que mais aparece em ${ni.label} nesse momento é a necessidade de ${dor}. ${cap(ni.prova)} — sempre com meta e ROI acordados antes de começar.`,
     ``,
-    `Faz sentido marcarmos uma *Reunião de Consultoria Gratuita com um Especialista*? São ~30 min onde te mostro, com base no que já mapeei, onde estão as maiores oportunidades — sem compromisso. Tenho ${diaSugestao()} ou prefere outro horário?`,
+    `Faz sentido a gente marcar uma *Consultoria Gratuita com um Especialista* (uns 30 min)? Te trago, com base no que já mapeei da ${empresa}, os 2–3 pontos com maior potencial de retorno pra vocês — sem compromisso. Consigo ${diaSugestao()}, ou prefere outro horário?`,
   ].join("\n");
 }
 function diaSugestao(): string { return "amanhã de manhã"; }
@@ -244,7 +303,8 @@ export function toCSV(leads: ProspLead[]): string {
     ["whatsapp1", "CELULAR/WHATSAPP 1"], ["whatsapp2", "CELULAR/WHATSAPP 2"], ["email", "EMAIL"],
     ["site", "SITE EMPRESA"], ["cidade", "CIDADE"], ["estado", "ESTADO"],
     ["instagram", "LINK INSTAGRAM"], ["facebook", "LINK FACEBOOK"], ["linkedin", "LINK LINKEDIN"], ["youtube", "LINK YOUTUBE"],
-    ["bdr", "BDR"], ["maturidade", "MATURIDADE"], ["status", "STATUS"],
+    ["bdr", "BDR/DONO"], ["nicho", "NICHO"], ["maturidade", "MATURIDADE"], ["status", "STATUS"],
+    ["dataReuniao", "DATA REUNIAO"], ["closerNome", "CLOSER"], ["canal", "CANAL"],
   ] as [keyof ProspLead, string][];
   const esc = (v: any) => { const s = String(v ?? ""); return /[",\n;]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
   const head = cols.map((c) => c[1]).join(";");

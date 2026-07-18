@@ -305,12 +305,15 @@ export default function App() {
     );
   }
 
-  // Rota standalone do Hub de Prospecção (não precisa de login — dados em localStorage)
+  // Rota standalone do Hub de Prospecção (dados em localStorage; usa o store p/ time/closers)
   if (labsView === 'prospeccao') {
     return (
-      <div className="flex h-screen w-full bg-[var(--color-v4-bg)]">
-        <LabProspeccaoRoute />
-      </div>
+      <AppProvider>
+        <Toaster position="top-right" />
+        <div className="flex h-screen w-full bg-[var(--color-v4-bg)]">
+          <LabProspeccaoRoute />
+        </div>
+      </AppProvider>
     );
   }
 
