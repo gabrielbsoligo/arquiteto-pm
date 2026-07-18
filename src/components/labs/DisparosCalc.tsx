@@ -1,6 +1,8 @@
 import React, { useMemo, useState } from "react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell } from "recharts";
-import { Send, DollarSign, Hand, Ban, Plus, Trash2, X, Calendar, TrendingUp } from "lucide-react";
+import { Send, DollarSign, Hand, Ban, Plus, Trash2, X, Calendar, TrendingUp, Building2, ArrowRight } from "lucide-react";
+import { useAppStore } from "../../store";
+import { pushToHub } from "./hubOutbound/hubLib";
 
 /**
  * DisparosCalc — Calculadora de disparos de WhatsApp (protótipo Labs).
@@ -14,7 +16,9 @@ const KEY = "v4_disparos_v1";
 const KEY_CUSTO = "v4_disparos_custo_v1";
 const CUSTO_PADRAO = 0.35;
 
-interface Dia { id: string; data: string; disparos: number; euQuero: number; bloquear: number; nota?: string; }
+interface EuQueroLead { empresa: string; contato: string; tel: string; bdr?: string; }
+interface Dia { id: string; data: string; disparos: number; euQuero: number; bloquear: number; nota?: string; euQueroLeads?: EuQueroLead[]; }
+const FALLBACK_TEAM = ["Lary", "Edric", "Bianca", "Erick"];
 
 const load = (): Dia[] => { try { const r = localStorage.getItem(KEY); return r ? JSON.parse(r) : []; } catch { return []; } };
 const save = (d: Dia[]) => { try { localStorage.setItem(KEY, JSON.stringify(d)); } catch { /* quota */ } };
@@ -25,10 +29,11 @@ const brl = (v: number) => v.toLocaleString("pt-BR", { style: "currency", curren
 const hojeISO = () => { const d = new Date(); const p = (n: number) => String(n).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; };
 const fmtDia = (iso: string) => { try { const [y, m, d] = iso.split("-"); return `${d}/${m}/${y.slice(2)}`; } catch { return iso; } };
 
-export const DisparosCalc: React.FC = () => {
+export const DisparosCalc: React.FC<{ team?: string[] }> = ({ team = FALLBACK_TEAM }) => {
   const [dias, setDias] = useState<Dia[]>(() => load());
   const [custo, setCusto] = useState<number>(() => loadCusto());
   const [banner, setBanner] = useState<string | null>(null);
+  const [euQueroModal, setEuQueroModal] = useState<{ n: number; data: string; disparos: number; bloquear: number } | null>(null);
   // form
   const [data, setData] = useState(hojeISO());
   const [disparos, setDisparos] = useState("");
@@ -41,16 +46,42 @@ export const DisparosCalc: React.FC = () => {
   const persist = (next: Dia[]) => { setDias(next); save(next); };
   const setCustoP = (v: number) => { setCusto(v); saveCusto(v); };
 
+  const salvarDia = (disp: number, eq: number, bl: number, euQueroLeads?: EuQueroLead[]) => {
+    const semData = dias.filter((d) => d.data !== data);
+    const registro: Dia = { id: data, data, disparos: disp, euQuero: eq, bloquear: bl, euQueroLeads };
+    persist([...semData, registro].sort((a, b) => b.data.localeCompare(a.data)));
+    setDisparos(""); setEuQuero(""); setBloquear("");
+  };
   const registrar = () => {
     const disp = parseInt(disparos || "0", 10) || 0;
     if (disp <= 0) { setBanner("Informe a quantidade de disparos do dia."); return; }
     const eq = parseInt(euQuero || "0", 10) || 0;
     const bl = parseInt(bloquear || "0", 10) || 0;
-    const semData = dias.filter((d) => d.data !== data);
-    const registro: Dia = { id: data, data, disparos: disp, euQuero: eq, bloquear: bl };
-    persist([...semData, registro].sort((a, b) => b.data.localeCompare(a.data)));
-    setDisparos(""); setEuQuero(""); setBloquear("");
-    setBanner(`Registrado ${fmtDia(data)}: ${disp} disparos · ${eq} eu quero · ${bl} bloquear.`);
+    if (eq >= 1) { setEuQueroModal({ n: eq, data, disparos: disp, bloquear: bl }); return; } // registra QUEM levantou a mão
+    salvarDia(disp, eq, bl);
+    setBanner(`Registrado ${fmtDia(data)}: ${disp} disparos · 0 eu quero · ${bl} bloquear.`);
+  };
+  // confirma quem levantou a mão → salva o dia + manda os leads pro Hub (Prospecção Ativa, canal Disparo)
+  const confirmarEuQuero = (leads: EuQueroLead[]) => {
+    if (!euQueroModal) return;
+    const validos = leads.filter((l) => (l.empresa || l.contato || l.tel).trim());
+    salvarDia(euQueroModal.disparos, validos.length, euQueroModal.bloquear, validos);
+    const now = new Date().toISOString();
+    const paraHub = validos.map((l, i) => ({
+      id: `disparo-${euQueroModal.data}-${Date.now()}-${i}`,
+      empresa: l.empresa || l.contato || "Lead do disparo", cnpj: "",
+      socio1: l.contato || "", socio2: "", whatsapp1: l.tel || "", whatsapp2: "", email: "", site: "",
+      cidade: "", estado: "", instagram: "", facebook: "", linkedin: "", youtube: "",
+      nicho: "Outro", origem: "Disparo",
+      decisorNome: l.contato || "", decisorCargo: "", decisorTel: l.tel || "", decisorEmail: "", decisorLinkedin: "",
+      bdr: l.bdr || null, maturidade: 1, maturidadeNivel: "Baixa", abordagem: "",
+      status: "prospeccao_ativa", canal: "Disparo",
+      atividades: [{ id: `${Date.now()}-${i}`, tipo: "whatsapp", resultado: "conectou", dataHora: now, nota: "Levantou a mão (Eu Quero) no disparo" }],
+      notas: "Origem: disparo de WhatsApp (Eu Quero)", batch: "disparo", createdAt: now, updatedAt: now, enviadoHub: true,
+    }));
+    const res = pushToHub(paraHub);
+    setEuQueroModal(null);
+    setBanner(`${fmtDia(euQueroModal.data)}: ${validos.length} "Eu Quero" registrado(s) → enviados ao Hub Outbound (Prospecção Ativa · canal Disparo). Hub agora com ${res.total} lead(s).`);
   };
   const remover = (id: string) => { if (confirm("Remover este dia?")) persist(dias.filter((d) => d.id !== id)); };
   const limparTudo = () => { if (confirm("Apagar TODOS os registros de disparos?")) persist([]); };
@@ -80,6 +111,7 @@ export const DisparosCalc: React.FC = () => {
     };
   }, [filtrados, custo]);
 
+  const euQueroLeadsPeriodo = useMemo(() => filtrados.flatMap((d) => (d.euQueroLeads || []).map((l) => ({ ...l, data: d.data }))), [filtrados]);
   const chartData = useMemo(() => [...filtrados].reverse().map((d) => ({ dia: fmtDia(d.data), Disparos: d.disparos, "Eu Quero": d.euQuero, custo: d.disparos * custo })), [filtrados, custo]);
   const maxFunil = Math.max(1, tot.disp);
 
@@ -213,7 +245,78 @@ export const DisparosCalc: React.FC = () => {
             </tbody>
           </table>
         </div>
+        {/* QUEM levantou a mão (Eu Quero) */}
+        {euQueroLeadsPeriodo.length > 0 && (
+          <div className={`overflow-x-auto ${card}`}>
+            <div className="px-4 py-3 border-b border-[var(--color-v4-border)] flex items-center gap-2">
+              <Hand size={15} style={{ color: RED }} /><span className="text-sm font-bold text-white">Quem levantou a mão (Eu Quero)</span>
+              <span className="text-[11px] text-[var(--color-v4-text-muted)]">{euQueroLeadsPeriodo.length} no período · enviados ao Hub (Prospecção Ativa · canal Disparo)</span>
+            </div>
+            <table className="w-full text-sm min-w-[620px]">
+              <thead className="bg-[var(--color-v4-surface)] text-[var(--color-v4-text-muted)] text-left text-[11px] uppercase tracking-wide">
+                <tr><th className="px-3 py-2.5">Data</th><th className="px-3 py-2.5">Empresa</th><th className="px-3 py-2.5">Contato</th><th className="px-3 py-2.5">Telefone</th><th className="px-3 py-2.5">Dono</th><th className="px-3 py-2.5"></th></tr>
+              </thead>
+              <tbody>
+                {euQueroLeadsPeriodo.map((l, i) => (
+                  <tr key={i} className="border-t border-[var(--color-v4-border)] text-white">
+                    <td className="px-3 py-2.5 text-[var(--color-v4-text-muted)]">{fmtDia(l.data)}</td>
+                    <td className="px-3 py-2.5 font-medium"><span className="inline-flex items-center gap-1.5"><Building2 size={13} className="text-[var(--color-v4-text-muted)]" />{l.empresa || "—"}</span></td>
+                    <td className="px-3 py-2.5 text-[var(--color-v4-text-muted)]">{l.contato || "—"}</td>
+                    <td className="px-3 py-2.5 text-[var(--color-v4-text-muted)]">{l.tel || "—"}</td>
+                    <td className="px-3 py-2.5 text-[var(--color-v4-text-muted)]">{l.bdr || "—"}</td>
+                    <td className="px-3 py-2.5 text-right"><span className="inline-flex items-center gap-1 text-[10.5px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400"><ArrowRight size={11} /> Hub</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
         <p className="text-[11px] text-[var(--color-v4-text-muted)]">Protótipo local (localStorage). Em produção, integra com a ferramenta de disparo (API) pra puxar os números automaticamente.</p>
+      </div>
+
+      {euQueroModal && <EuQueroModal n={euQueroModal.n} data={euQueroModal.data} team={team} onClose={() => setEuQueroModal(null)} onConfirm={confirmarEuQuero} />}
+    </div>
+  );
+};
+
+// ---------------- Modal: quem levantou a mão (Eu Quero) ----------------
+const EuQueroModal: React.FC<{ n: number; data: string; team: string[]; onClose: () => void; onConfirm: (leads: EuQueroLead[]) => void }> = ({ n, data, team, onClose, onConfirm }) => {
+  const [rows, setRows] = useState<EuQueroLead[]>(() => Array.from({ length: Math.max(1, n) }, () => ({ empresa: "", contato: "", tel: "", bdr: "" })));
+  const setRow = (i: number, k: keyof EuQueroLead, v: string) => setRows((r) => r.map((row, idx) => (idx === i ? { ...row, [k]: v } : row)));
+  const addRow = () => setRows((r) => [...r, { empresa: "", contato: "", tel: "", bdr: "" }]);
+  const delRow = (i: number) => setRows((r) => r.filter((_, idx) => idx !== i));
+  const preenchidos = rows.filter((l) => (l.empresa || l.contato || l.tel).trim()).length;
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
+      <div className={`relative w-full max-w-2xl ${card} p-5 max-h-[90vh] overflow-y-auto`}>
+        <div className="flex items-center gap-2 mb-1"><Hand size={16} style={{ color: RED }} /><h3 className="text-sm font-bold text-white">Quem levantou a mão? — {fmtDia(data)}</h3><div className="flex-1" /><button onClick={onClose} className="text-[var(--color-v4-text-muted)] hover:text-white"><X size={18} /></button></div>
+        <p className="text-[11px] text-[var(--color-v4-text-muted)] mb-3">Registre as empresas/pessoas que apertaram <b className="text-white">Eu Quero</b>. Vão pro <b className="text-white">Hub Outbound</b> na etapa <b style={{ color: RED }}>Prospecção Ativa</b> com canal <b className="text-white">Disparo</b>.</p>
+        <div className="space-y-2">
+          <div className="grid grid-cols-[1.4fr_1.2fr_1fr_0.9fr_auto] gap-2 text-[10px] uppercase font-semibold text-[var(--color-v4-text-muted)] px-1">
+            <span>Empresa</span><span>Contato</span><span>Telefone</span><span>Dono</span><span></span>
+          </div>
+          {rows.map((row, i) => (
+            <div key={i} className="grid grid-cols-[1.4fr_1.2fr_1fr_0.9fr_auto] gap-2 items-center">
+              <input value={row.empresa} onChange={(e) => setRow(i, "empresa", e.target.value)} placeholder="Empresa" className="border border-[var(--color-v4-border)] bg-[var(--color-v4-surface)] text-white rounded-lg px-2.5 py-2 text-sm" />
+              <input value={row.contato} onChange={(e) => setRow(i, "contato", e.target.value)} placeholder="Nome do contato" className="border border-[var(--color-v4-border)] bg-[var(--color-v4-surface)] text-white rounded-lg px-2.5 py-2 text-sm" />
+              <input value={row.tel} onChange={(e) => setRow(i, "tel", e.target.value)} placeholder="WhatsApp" className="border border-[var(--color-v4-border)] bg-[var(--color-v4-surface)] text-white rounded-lg px-2.5 py-2 text-sm" />
+              <select value={row.bdr} onChange={(e) => setRow(i, "bdr", e.target.value)} className="border border-[var(--color-v4-border)] bg-[var(--color-v4-surface)] text-white rounded-lg px-2 py-2 text-sm">
+                <option value="">— dono —</option>
+                {team.map((t) => <option key={t} value={t}>{t}</option>)}
+              </select>
+              <button onClick={() => delRow(i)} className="text-[var(--color-v4-text-muted)] hover:text-[var(--color-v4-red)] p-1" title="Remover linha"><Trash2 size={14} /></button>
+            </div>
+          ))}
+        </div>
+        <button onClick={addRow} className="mt-2 inline-flex items-center gap-1.5 text-[12px] text-[var(--color-v4-text-muted)] hover:text-white"><Plus size={13} /> adicionar mais um</button>
+        <div className="flex gap-2 mt-4 items-center">
+          <span className="text-[11px] text-[var(--color-v4-text-muted)]">{preenchidos} lead(s) preenchido(s)</span>
+          <div className="flex-1" />
+          <button onClick={onClose} className="py-2 px-3 rounded-lg border border-[var(--color-v4-border)] text-[var(--color-v4-text-muted)] text-sm">Cancelar</button>
+          <button disabled={!preenchidos} onClick={() => onConfirm(rows)} className="inline-flex items-center justify-center gap-2 py-2 px-4 rounded-lg text-white text-sm font-bold disabled:opacity-30" style={{ background: RED }}><ArrowRight size={14} /> Registrar e enviar ao Hub</button>
+        </div>
       </div>
     </div>
   );
@@ -233,5 +336,12 @@ const Kpi: React.FC<{ icon: any; label: string; value: React.ReactNode; hint?: s
   </div>
 );
 
-export const LabDisparosRoute: React.FC = () => <DisparosCalc />;
+export const LabDisparosRoute: React.FC = () => {
+  const store = useAppStore();
+  const team = useMemo(() => {
+    const t = store.members.filter((m) => m.active && (m.role === "sdr" || m.role === "gestor")).map((m) => m.name);
+    return t.length ? t : FALLBACK_TEAM;
+  }, [store.members]);
+  return <DisparosCalc team={team} />;
+};
 export default DisparosCalc;
