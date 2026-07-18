@@ -237,6 +237,8 @@ export function loadLeads(): ProspLead[] {
       nicho: l.nicho || "Mercado Imobiliário / Incorporadoras",
       abordagem: l.abordagem || "",
       notas: l.notas || "",
+      // origem por canal: vazia ou igual ao nome do lote (arquivo importado) => "Lista Fria"
+      origem: (l.origem && l.origem !== l.batch) ? l.origem : "Lista Fria",
       status: VALID_STATUS.has(l.status) ? l.status : (STATUS_MIGRA[l.status as string] || "novo"),
       maturidade: l.maturidade && l.maturidade > 0 ? l.maturidade : autoMaturidade(l),
     }));

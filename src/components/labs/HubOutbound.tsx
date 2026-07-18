@@ -1172,7 +1172,7 @@ function seedDemo(team: string[]): ProspLead[] {
   const bdrs = team.length ? team : ["BDR 1", "BDR 2", "BDR 3"];
   const nichos = ["SaaS / Tecnologia", "Saúde e Beleza", "Construtoras / Incorporadoras"];
   const cidades = [["São José dos Campos", "SP"], ["Jacareí", "SP"], ["Taubaté", "SP"], ["Caçapava", "SP"], ["Pindamonhangaba", "SP"]];
-  const origens = ["Lemit", "Apollo", "Indicação", "Evento"];
+  const origens = ["Lista Fria", "Disparo", "Email", "Indicação"];
   const empresasBase = ["Nexus", "Vale", "Alpha", "Prime", "Horizonte", "Vitta", "Bella", "Terra", "Norte", "Sirius", "Delta", "Aurora", "Meridian", "Quantum", "Solar", "Atlas", "Vertex", "Lumen", "Onda", "Cedro"];
   const sufixo: Record<string, string> = { "SaaS / Tecnologia": "Tech", "Saúde e Beleza": "Estética", "Construtoras / Incorporadoras": "Incorporadora" };
   const cargos = ["CEO", "Diretor Comercial", "Sócia", "Head de Marketing"];

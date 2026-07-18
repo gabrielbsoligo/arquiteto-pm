@@ -436,13 +436,19 @@ const STATUS_MIGRA: Record<string, Status> = {
 // normaliza um lead (da Prospecção OU do próprio Hub) pro modelo rico de 9 etapas.
 function normalizeLead(l: any): ProspLead {
   const maturidade = l.maturidade && l.maturidade > 0 ? l.maturidade : autoMaturidade(l);
+  // Origem por canal: se veio vazia ou igual ao nome do lote/arquivo (importação de lista),
+  // trata como "Lista Fria". Canais reais (Disparo, Email, Indicação, etc.) são preservados.
+  const origem = (l.origem && l.origem !== l.batch && l.origem !== "Importada")
+    ? l.origem
+    : "Lista Fria";
   return {
-    cnpj: "", origem: l.origem || l.batch || "Importada", decisorNome: l.decisorNome || l.socio1 || "",
+    cnpj: "", decisorNome: l.decisorNome || l.socio1 || "",
     decisorCargo: l.decisorCargo || (l.socio1 ? "Sócio(a)" : ""), decisorTel: l.decisorTel || l.whatsapp1 || "",
     decisorEmail: l.decisorEmail || l.email || "", decisorLinkedin: l.decisorLinkedin || "",
     atividades: Array.isArray(l.atividades) ? l.atividades : [],
     createdAt: l.createdAt || new Date().toISOString(), updatedAt: l.updatedAt || l.createdAt || new Date().toISOString(),
     ...l,
+    origem,
     nicho: l.nicho || "Construtoras / Incorporadoras",
     abordagem: l.abordagem || "", notas: l.notas || "",
     status: VALID_STATUS.has(l.status) ? l.status : (STATUS_MIGRA[l.status as string] || "inteligencia"),
