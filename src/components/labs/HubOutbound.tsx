@@ -61,7 +61,7 @@ export const HubOutbound: React.FC<HubProps> = ({ teamMembers, closers = [] }) =
   // filtros: nicho, maturidade, período (criado/atualizado)
   const [nichoFilter, setNichoFilter] = useState<string>("todos");
   const [matFilter, setMatFilter] = useState<Nivel | "todos">("todos");
-  const [porteFilter, setPorteFilter] = useState<string>("todos");
+  const [porteFilter, setPorteFilter] = useState<string[]>([]); // vazio = todos os portes (múltipla escolha)
   const [periodoPreset, setPeriodoPreset] = useState<"tudo" | "hoje" | "7d" | "30d" | "custom">("tudo");
   const [periodoBase, setPeriodoBase] = useState<"createdAt" | "updatedAt">("createdAt");
   const [dtDe, setDtDe] = useState(""); const [dtAte, setDtAte] = useState("");
@@ -114,7 +114,7 @@ export const HubOutbound: React.FC<HubProps> = ({ teamMembers, closers = [] }) =
     }
     return [-Infinity, Infinity];
   }, [periodoPreset, dtDe, dtAte]);
-  const filtrosAtivos = nichoFilter !== "todos" || matFilter !== "todos" || porteFilter !== "todos" || periodoPreset !== "tudo" || !!statusFilter;
+  const filtrosAtivos = nichoFilter !== "todos" || matFilter !== "todos" || porteFilter.length > 0 || periodoPreset !== "tudo" || !!statusFilter;
 
   const bdrLeads = useMemo(() => leads.filter((l) => bdrFilter === "todos" || l.bdr === bdrFilter), [leads, bdrFilter]);
   // filtro comum (aplica em Kanban, Tabela e Gestão): busca + nicho + maturidade + período
@@ -124,7 +124,7 @@ export const HubOutbound: React.FC<HubProps> = ({ teamMembers, closers = [] }) =
     return bdrLeads.filter((l) => {
       if (nichoFilter !== "todos" && (l.nicho || "") !== nichoFilter) return false;
       if (matFilter !== "todos" && (l.maturidadeNivel || maturidadeBanda(l.maturidade)) !== matFilter) return false;
-      if (porteFilter !== "todos" && (l.empresaInfo?.porte || "") !== porteFilter) return false;
+      if (porteFilter.length && !porteFilter.includes(l.empresaInfo?.porte || "")) return false;
       const t = new Date((periodoBase === "updatedAt" ? l.updatedAt : l.createdAt) || l.createdAt).getTime();
       if (!(t >= from && t <= to)) return false;
       if (s && !(l.empresa.toLowerCase().includes(s) || l.cidade.toLowerCase().includes(s) || (l.decisorNome || "").toLowerCase().includes(s))) return false;
@@ -136,7 +136,7 @@ export const HubOutbound: React.FC<HubProps> = ({ teamMembers, closers = [] }) =
 
   const metrics = useMemo(() => funnelMetrics(common), [common]);
   const countByBdr = (b: string) => leads.filter((l) => l.bdr === b).length;
-  const limparFiltros = () => { setNichoFilter("todos"); setMatFilter("todos"); setPorteFilter("todos"); setPeriodoPreset("tudo"); setStatusFilter(null); setDtDe(""); setDtAte(""); };
+  const limparFiltros = () => { setNichoFilter("todos"); setMatFilter("todos"); setPorteFilter([]); setPeriodoPreset("tudo"); setStatusFilter(null); setDtDe(""); setDtAte(""); };
   const open = openId ? leads.find((l) => l.id === openId) || null : null;
 
   // seleção (remover leads)
@@ -283,10 +283,7 @@ export const HubOutbound: React.FC<HubProps> = ({ teamMembers, closers = [] }) =
                 <option value="todos">Toda maturidade</option>
                 {NIVEIS.map((nv) => <option key={nv} value={nv}>Maturidade {nv}</option>)}
               </select>
-              <select value={porteFilter} onChange={(e) => setPorteFilter(e.target.value)} className="rounded-lg border border-[var(--color-v4-border)] bg-[var(--color-v4-surface)] text-white px-2 py-1.5 text-xs" title="Porte da empresa">
-                <option value="todos">Todo porte</option>
-                {portesDisponiveis.map((p) => <option key={p} value={p}>{p}</option>)}
-              </select>
+              <PorteMultiSelect options={portesDisponiveis} selected={porteFilter} onChange={setPorteFilter} />
               <select value={statusFilter || ""} onChange={(e) => setStatusFilter((e.target.value || null) as Status | null)} className="rounded-lg border border-[var(--color-v4-border)] bg-[var(--color-v4-surface)] text-white px-2 py-1.5 text-xs">
                 <option value="">Todas as etapas</option>
                 {STATUS_ORDER.map((s) => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}
@@ -655,6 +652,39 @@ const ViewTab: React.FC<{ active: boolean; onClick: () => void; icon: any; label
     <Icon size={14} /> {label}
   </button>
 );
+
+// filtro de porte com MÚLTIPLA escolha (dropdown com checkboxes)
+const PorteMultiSelect: React.FC<{ options: string[]; selected: string[]; onChange: (v: string[]) => void }> = ({ options, selected, onChange }) => {
+  const [open, setOpen] = useState(false);
+  const toggle = (p: string) => onChange(selected.includes(p) ? selected.filter((x) => x !== p) : [...selected, p]);
+  const label = selected.length === 0 ? "Todo porte" : selected.length === 1 ? selected[0] : `Porte (${selected.length})`;
+  return (
+    <div className="relative">
+      <button onClick={() => setOpen((o) => !o)} className={`inline-flex items-center gap-1.5 rounded-lg border px-2 py-1.5 text-xs ${selected.length ? "text-white border-[var(--color-v4-red)]" : "text-white border-[var(--color-v4-border)]"} bg-[var(--color-v4-surface)]`} title="Porte da empresa (múltipla escolha)">
+        <Briefcase size={12} /> {label} <span className="text-[9px] opacity-70">▾</span>
+      </button>
+      {open && (<>
+        <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+        <div className="absolute z-50 mt-1 w-56 rounded-lg border border-[var(--color-v4-border)] bg-[var(--color-v4-card)] shadow-xl p-2">
+          <div className="flex items-center justify-between px-1 pb-1.5 mb-1 border-b border-[var(--color-v4-border)]">
+            <span className="text-[10px] uppercase font-semibold text-[var(--color-v4-text-muted)]">Porte — marque vários</span>
+            {selected.length > 0 && <button onClick={() => onChange([])} className="text-[10px] underline text-[var(--color-v4-text-muted)] hover:text-white">limpar</button>}
+          </div>
+          {options.length === 0 && <div className="text-[11px] text-[var(--color-v4-text-muted)] px-1 py-1">Nenhum porte (enriqueça os leads).</div>}
+          {options.map((p) => {
+            const on = selected.includes(p);
+            return (
+              <button key={p} onClick={() => toggle(p)} className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-[12px] text-left ${on ? "text-white" : "text-[var(--color-v4-text-muted)] hover:bg-[var(--color-v4-surface)]"}`} style={on ? { background: RED } : undefined}>
+                <span className={`w-4 h-4 shrink-0 rounded flex items-center justify-center border-2 ${on ? "border-white/70" : "border-[var(--color-v4-text-muted)]"}`}>{on && <Check size={11} className="text-white" strokeWidth={3} />}</span>
+                {p}
+              </button>
+            );
+          })}
+        </div>
+      </>)}
+    </div>
+  );
+};
 
 const Cbox: React.FC<{ checked: boolean; onChange: () => void; title?: string }> = ({ checked, onChange, title }) => (
   <button type="button" title={title} onClick={(e) => { e.stopPropagation(); onChange(); }}
