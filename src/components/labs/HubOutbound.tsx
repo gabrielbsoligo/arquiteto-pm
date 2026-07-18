@@ -28,6 +28,8 @@ import {
  */
 const RED = "var(--color-v4-red)";
 const card = "rounded-xl border border-[var(--color-v4-border)] bg-[var(--color-v4-card)]";
+const fmtDate = (iso?: string) => { if (!iso) return "—"; try { return new Date(iso).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit" }); } catch { return "—"; } };
+const fmtDateTime = (iso?: string) => { if (!iso) return "—"; try { return new Date(iso).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }); } catch { return "—"; } };
 const CANAIS = ["outbound", "inbound", "indicacao", "recomendacao"];
 const CHECKLIST = [
   { icon: Globe, title: "SITE / LP", tips: "Proposta de valor · Stack tecnológico · Maturidade de conversão (CTAs) · Prova social" },
@@ -56,6 +58,11 @@ export const HubOutbound: React.FC<HubProps> = ({ teamMembers, closers = [] }) =
   const [agendarFor, setAgendarFor] = useState<ProspLead | null>(null);
   const [perdaFor, setPerdaFor] = useState<ProspLead | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  // filtros: nicho, período (criado/atualizado)
+  const [nichoFilter, setNichoFilter] = useState<string>("todos");
+  const [periodoPreset, setPeriodoPreset] = useState<"tudo" | "hoje" | "7d" | "30d" | "custom">("tudo");
+  const [periodoBase, setPeriodoBase] = useState<"createdAt" | "updatedAt">("createdAt");
+  const [dtDe, setDtDe] = useState(""); const [dtAte, setDtAte] = useState("");
 
   const persist = (next: ProspLead[]) => { setLeads(next); saveLeads(next); };
   const updateLead = (id: string, patch: Partial<ProspLead>) => {
@@ -87,17 +94,40 @@ export const HubOutbound: React.FC<HubProps> = ({ teamMembers, closers = [] }) =
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [teamNames.join(",")]);
 
-  const bdrLeads = useMemo(() => leads.filter((l) => bdrFilter === "todos" || l.bdr === bdrFilter), [leads, bdrFilter]);
-  const filtered = useMemo(() => {
-    const s = search.trim().toLowerCase();
-    return bdrLeads.filter((l) =>
-      (!statusFilter || l.status === statusFilter) &&
-      (!s || l.empresa.toLowerCase().includes(s) || l.cidade.toLowerCase().includes(s) || (l.decisorNome || "").toLowerCase().includes(s)))
-      .sort((a, b) => b.maturidade - a.maturidade);
-  }, [bdrLeads, statusFilter, search]);
+  const nichosDisponiveis = useMemo(() => Array.from(new Set(leads.map((l) => l.nicho).filter(Boolean))).sort(), [leads]);
+  const periodRange = useMemo<[number, number]>(() => {
+    const now = Date.now();
+    if (periodoPreset === "hoje") { const d = new Date(); d.setHours(0, 0, 0, 0); return [d.getTime(), Infinity]; }
+    if (periodoPreset === "7d") return [now - 7 * 864e5, Infinity];
+    if (periodoPreset === "30d") return [now - 30 * 864e5, Infinity];
+    if (periodoPreset === "custom") {
+      const from = dtDe ? new Date(dtDe + "T00:00:00").getTime() : -Infinity;
+      const to = dtAte ? new Date(dtAte + "T23:59:59").getTime() : Infinity;
+      return [from, to];
+    }
+    return [-Infinity, Infinity];
+  }, [periodoPreset, dtDe, dtAte]);
+  const filtrosAtivos = nichoFilter !== "todos" || periodoPreset !== "tudo" || !!statusFilter;
 
-  const metrics = useMemo(() => funnelMetrics(bdrLeads), [bdrLeads]);
+  const bdrLeads = useMemo(() => leads.filter((l) => bdrFilter === "todos" || l.bdr === bdrFilter), [leads, bdrFilter]);
+  // filtro comum (aplica em Kanban, Tabela e Gestão): busca + nicho + período
+  const common = useMemo(() => {
+    const s = search.trim().toLowerCase();
+    const [from, to] = periodRange;
+    return bdrLeads.filter((l) => {
+      if (nichoFilter !== "todos" && (l.nicho || "") !== nichoFilter) return false;
+      const t = new Date((periodoBase === "updatedAt" ? l.updatedAt : l.createdAt) || l.createdAt).getTime();
+      if (!(t >= from && t <= to)) return false;
+      if (s && !(l.empresa.toLowerCase().includes(s) || l.cidade.toLowerCase().includes(s) || (l.decisorNome || "").toLowerCase().includes(s))) return false;
+      return true;
+    });
+  }, [bdrLeads, nichoFilter, periodRange, periodoBase, search]);
+  // tabela adiciona o filtro de etapa; Kanban usa etapa pra mostrar só a coluna
+  const filtered = useMemo(() => common.filter((l) => !statusFilter || l.status === statusFilter).sort((a, b) => b.maturidade - a.maturidade), [common, statusFilter]);
+
+  const metrics = useMemo(() => funnelMetrics(common), [common]);
   const countByBdr = (b: string) => leads.filter((l) => l.bdr === b).length;
+  const limparFiltros = () => { setNichoFilter("todos"); setPeriodoPreset("tudo"); setStatusFilter(null); setDtDe(""); setDtAte(""); };
   const open = openId ? leads.find((l) => l.id === openId) || null : null;
 
   // seleção (remover leads)
@@ -209,7 +239,7 @@ export const HubOutbound: React.FC<HubProps> = ({ teamMembers, closers = [] }) =
         ) : (
           <>
             {/* filtros BDR + busca + métricas topo */}
-            <div className="flex flex-wrap items-center gap-2 mb-4">
+            <div className="flex flex-wrap items-center gap-2 mb-3">
               <Users size={15} className="text-[var(--color-v4-text-muted)]" />
               <TabBtn active={bdrFilter === "todos"} onClick={() => setBdrFilter("todos")} label={`Todos (${leads.length})`} />
               {teamNames.map((b) => <TabBtn key={b} active={bdrFilter === b} onClick={() => setBdrFilter(b)} label={`${b} (${countByBdr(b)})`} />)}
@@ -221,10 +251,37 @@ export const HubOutbound: React.FC<HubProps> = ({ teamMembers, closers = [] }) =
               </div>
             </div>
 
+            {/* barra de filtros: período · nicho · etapa */}
+            <div className="flex flex-wrap items-center gap-2 mb-4 text-sm">
+              <Calendar size={14} className="text-[var(--color-v4-text-muted)]" />
+              <select value={periodoBase} onChange={(e) => setPeriodoBase(e.target.value as any)} className="rounded-lg border border-[var(--color-v4-border)] bg-[var(--color-v4-surface)] text-white px-2 py-1.5 text-xs" title="Base da data">
+                <option value="createdAt">Criação</option><option value="updatedAt">Atualização</option>
+              </select>
+              <select value={periodoPreset} onChange={(e) => setPeriodoPreset(e.target.value as any)} className="rounded-lg border border-[var(--color-v4-border)] bg-[var(--color-v4-surface)] text-white px-2 py-1.5 text-xs">
+                <option value="tudo">Todo o período</option><option value="hoje">Hoje</option><option value="7d">Últimos 7 dias</option><option value="30d">Últimos 30 dias</option><option value="custom">Personalizado…</option>
+              </select>
+              {periodoPreset === "custom" && (<>
+                <input type="date" value={dtDe} onChange={(e) => setDtDe(e.target.value)} className="rounded-lg border border-[var(--color-v4-border)] bg-[var(--color-v4-surface)] text-white px-2 py-1.5 text-xs" />
+                <span className="text-[var(--color-v4-text-muted)] text-xs">até</span>
+                <input type="date" value={dtAte} onChange={(e) => setDtAte(e.target.value)} className="rounded-lg border border-[var(--color-v4-border)] bg-[var(--color-v4-surface)] text-white px-2 py-1.5 text-xs" />
+              </>)}
+              <span className="w-px h-5 bg-[var(--color-v4-border)] mx-1" />
+              <select value={nichoFilter} onChange={(e) => setNichoFilter(e.target.value)} className="rounded-lg border border-[var(--color-v4-border)] bg-[var(--color-v4-surface)] text-white px-2 py-1.5 text-xs">
+                <option value="todos">Todos os nichos</option>
+                {nichosDisponiveis.map((n) => <option key={n} value={n}>{n}</option>)}
+              </select>
+              <select value={statusFilter || ""} onChange={(e) => setStatusFilter((e.target.value || null) as Status | null)} className="rounded-lg border border-[var(--color-v4-border)] bg-[var(--color-v4-surface)] text-white px-2 py-1.5 text-xs">
+                <option value="">Todas as etapas</option>
+                {STATUS_ORDER.map((s) => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}
+              </select>
+              <span className="text-[11px] text-[var(--color-v4-text-muted)]">{common.length} lead(s){statusFilter ? ` · ${filtered.length} em ${STATUS_LABELS[statusFilter]}` : ""}</span>
+              {filtrosAtivos && <button onClick={limparFiltros} className="text-[11px] underline text-[var(--color-v4-text-muted)] hover:text-white">limpar filtros</button>}
+            </div>
+
             <MetricStrip m={metrics} />
 
             {view === "kanban" && (
-              <KanbanBoard leads={filtered} onDragEnd={onDragEnd} onOpen={(id) => setOpenId(id)} />
+              <KanbanBoard leads={statusFilter ? filtered : common} onlyStatus={statusFilter} onDragEnd={onDragEnd} onOpen={(id) => setOpenId(id)} />
             )}
 
             {view === "tabela" && (
@@ -237,7 +294,7 @@ export const HubOutbound: React.FC<HubProps> = ({ teamMembers, closers = [] }) =
             )}
 
             {view === "gestao" && (
-              <GestaoPanel leads={bdrLeads} team={bdrFilter === "todos" ? teamNames : [bdrFilter]} onDemo={loadDemo} />
+              <GestaoPanel leads={common} team={bdrFilter === "todos" ? teamNames : [bdrFilter]} onDemo={loadDemo} />
             )}
           </>
         )}
@@ -269,12 +326,13 @@ const Kpi: React.FC<{ label: string; value: React.ReactNode; hint?: string; acce
 );
 
 // ================= KANBAN =================
-const KanbanBoard: React.FC<{ leads: ProspLead[]; onDragEnd: (r: DropResult) => void; onOpen: (id: string) => void }> = ({ leads, onDragEnd, onOpen }) => {
+const KanbanBoard: React.FC<{ leads: ProspLead[]; onlyStatus?: Status | null; onDragEnd: (r: DropResult) => void; onOpen: (id: string) => void }> = ({ leads, onlyStatus, onDragEnd, onOpen }) => {
   const byStatus = (s: Status) => leads.filter((l) => l.status === s);
+  const cols = onlyStatus ? [onlyStatus] : STATUS_ORDER;
   return (
     <DragDropContext onDragEnd={onDragEnd}>
       <div className="flex gap-3 overflow-x-auto pb-3">
-        {STATUS_ORDER.map((s) => {
+        {cols.map((s) => {
           const col = byStatus(s);
           return (
             <div key={s} className="w-[230px] shrink-0">
@@ -316,6 +374,10 @@ const KanbanBoard: React.FC<{ leads: ProspLead[]; onDragEnd: (r: DropResult) => 
                             <div className="flex items-center justify-between mt-1.5">
                               <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-[var(--color-v4-card)] border border-[var(--color-v4-border)] text-[var(--color-v4-text-muted)]">{l.bdr || "—"}</span>
                               <Stars value={l.maturidade} readOnly small />
+                            </div>
+                            <div className="mt-1 flex items-center gap-2 text-[8.5px] text-[var(--color-v4-text-muted)] opacity-75">
+                              <span title={`Criado em ${fmtDateTime(l.createdAt)}`}>criado {fmtDate(l.createdAt)}</span>
+                              <span title={`Atualizado em ${fmtDateTime(l.updatedAt)}`}>· atual. {fmtDate(l.updatedAt)}</span>
                             </div>
                           </div>
                         )}
@@ -360,13 +422,13 @@ const TabelaView: React.FC<{
     )}
 
     <div className={`overflow-x-auto ${card}`}>
-      <table className="w-full text-sm min-w-[980px]">
+      <table className="w-full text-sm min-w-[1120px]">
         <thead className="bg-[var(--color-v4-surface)] text-[var(--color-v4-text-muted)] text-left text-[11px] uppercase tracking-wide">
           <tr>
             <th className="px-3 py-2.5 w-8"><Cbox checked={allVisibleSelected} onChange={toggleAllVisible} title="Selecionar / limpar todos" /></th>
             <th className="px-3 py-2.5">Empresa</th><th className="px-3 py-2.5">Nicho</th><th className="px-3 py-2.5">Cidade/UF</th>
             <th className="px-3 py-2.5">Decisor</th><th className="px-3 py-2.5">Dono</th><th className="px-3 py-2.5">Presença</th>
-            <th className="px-3 py-2.5">Etapa</th><th className="px-3 py-2.5"></th>
+            <th className="px-3 py-2.5">Etapa</th><th className="px-3 py-2.5">Criado</th><th className="px-3 py-2.5">Atualizado</th><th className="px-3 py-2.5"></th>
           </tr>
         </thead>
         <tbody>
@@ -380,10 +442,12 @@ const TabelaView: React.FC<{
               <td className="px-3 py-2.5"><span className="text-[11px] px-2 py-0.5 rounded-full bg-[var(--color-v4-surface)] border border-[var(--color-v4-border)]">{l.bdr || "—"}</span></td>
               <td className="px-3 py-2.5"><Stars value={l.maturidade} readOnly /></td>
               <td className="px-3 py-2.5"><StatusPill status={l.status} /></td>
+              <td className="px-3 py-2.5 text-[var(--color-v4-text-muted)] text-[11px]" title={fmtDateTime(l.createdAt)}>{fmtDate(l.createdAt)}</td>
+              <td className="px-3 py-2.5 text-[var(--color-v4-text-muted)] text-[11px]" title={fmtDateTime(l.updatedAt)}>{fmtDate(l.updatedAt)}</td>
               <td className="px-3 py-2.5 text-right"><span className="text-[11px] font-semibold" style={{ color: RED }}>Abrir →</span></td>
             </tr>
           ))}
-          {filtered.length === 0 && <tr><td colSpan={9} className="px-3 py-8 text-center text-[var(--color-v4-text-muted)]">Nenhum lead nesse filtro.</td></tr>}
+          {filtered.length === 0 && <tr><td colSpan={11} className="px-3 py-8 text-center text-[var(--color-v4-text-muted)]">Nenhum lead nesse filtro.</td></tr>}
         </tbody>
       </table>
     </div>
@@ -674,6 +738,7 @@ const LeadPanel: React.FC<{ lead: ProspLead; closers: Member[]; onClose: () => v
           <div>
             <h2 className="text-base font-extrabold flex items-center gap-2 text-white"><Building2 size={18} style={{ color: RED }} />{lead.empresa || "—"}</h2>
             <p className="text-xs text-[var(--color-v4-text-muted)]">{[lead.cidade, lead.estado].filter(Boolean).join("/")} · {lead.nicho} · dono {lead.bdr || "—"} · origem {lead.origem || "—"}</p>
+            <p className="text-[10.5px] text-[var(--color-v4-text-muted)] mt-0.5 flex items-center gap-1"><Clock size={10} /> Criado em {fmtDateTime(lead.createdAt)} · Atualizado em {fmtDateTime(lead.updatedAt)}</p>
           </div>
           <div className="flex-1" />
           <button onClick={onClose} className="text-[var(--color-v4-text-muted)] hover:text-white"><X size={20} /></button>

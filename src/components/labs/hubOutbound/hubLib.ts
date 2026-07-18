@@ -58,7 +58,7 @@ export const nivelToNum = (nv: Nivel): number => (nv === "Baixa" ? 2 : nv === "M
 
 // ---------------- Nichos (foco: SaaS, Saúde e Beleza, Construtoras) ----------------
 export const NICHOS = [
-  "SaaS / Tecnologia", "Saúde e Beleza", "Construtoras / Incorporadoras",
+  "SaaS / Tecnologia", "Energia", "Academias / Esportes", "Saúde e Beleza", "Construtoras / Incorporadoras",
   "Varejo / E-commerce", "Serviços B2B", "Educação", "Indústria", "Outro",
 ];
 
@@ -270,6 +270,8 @@ const SITUACOES = ["Ativa", "Ativa", "Ativa", "Ativa", "Suspensa"];
 const NAT_JUR = ["Sociedade Empresária Limitada (LTDA)", "Empresário Individual (EI)", "Sociedade Anônima (S.A.)", "Sociedade Limitada Unipessoal (SLU)"];
 const CNAE_POR_NICHO: { re: RegExp; atividade: string; cnae: string }[] = [
   { re: /saas|tecnolog|software|tech|app/, atividade: "Desenvolvimento de software sob encomenda", cnae: "6201-5/01" },
+  { re: /energ|solar|fotovolt|renov/, atividade: "Geração/comércio de energia (solar fotovoltaica)", cnae: "3511-5/01" },
+  { re: /academ|esporte|fitness|cross|pilates|estudio|estúdio/, atividade: "Atividades de condicionamento físico", cnae: "9313-1/00" },
   { re: /saud|saúde|beleza|clinic|clínic|estetic|estétic|odont/, atividade: "Atividades de atenção à saúde / estética", cnae: "8630-5/03" },
   { re: /imob|incorpor|constru/, atividade: "Incorporação de empreendimentos imobiliários", cnae: "4110-7/00" },
   { re: /varej|commerce|loja|ecom/, atividade: "Comércio varejista", cnae: "4712-1/00" },
@@ -314,15 +316,21 @@ export function enrichLead(lead: ProspLead): Partial<ProspLead> {
   tentar(genFixo(ddd, rng), "Fixo comercial");
   if (rng() > 0.5) tentar(genCelular(ddd, rng), "Recado (recepção)");
 
+  // garante pelo menos 1 telefone extra
+  if (tels.length === 0) tels.push({ numero: genCelular(ddd, rng), tipo: "Celular/WhatsApp" });
+
   // sócios adicionais (quadro societário) com telefone próprio
+  const genNome = () => `${SOCIO_NOMES[Math.floor(rng() * SOCIO_NOMES.length)]} ${SOCIO_SOBRENOMES[Math.floor(rng() * SOCIO_SOBRENOMES.length)]}`;
   const nExtra = 1 + Math.floor(rng() * 2); // 1..2
   const sociosExtra: SocioExtra[] = [];
   const usados = new Set([lead.socio1, lead.socio2, lead.decisorNome].filter(Boolean));
   for (let i = 0; i < nExtra; i++) {
-    const nome = `${SOCIO_NOMES[Math.floor(rng() * SOCIO_NOMES.length)]} ${SOCIO_SOBRENOMES[Math.floor(rng() * SOCIO_SOBRENOMES.length)]}`;
+    const nome = genNome();
     if (usados.has(nome)) continue; usados.add(nome);
     sociosExtra.push({ nome, cargo: SOCIO_CARGOS[Math.floor(rng() * SOCIO_CARGOS.length)], telefone: genCelular(ddd, rng), participacao: `${10 + Math.floor(rng() * 80)}%` });
   }
+  // garante pelo menos 1 sócio no quadro
+  if (sociosExtra.length === 0) sociosExtra.push({ nome: genNome(), cargo: "Sócio-administrador", telefone: genCelular(ddd, rng), participacao: `${30 + Math.floor(rng() * 50)}%` });
 
   const cn = CNAE_POR_NICHO.find((c) => c.re.test((lead.nicho || "").toLowerCase()));
   const ano = 1998 + Math.floor(rng() * 25);
@@ -341,15 +349,18 @@ export function enrichLead(lead: ProspLead): Partial<ProspLead> {
   const emailsExtra = [`comercial@${(lead.empresa || "empresa").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 14) || "empresa"}.com.br`];
 
   // DECISOR: o Lemit identifica o sócio-decisor e seus contatos. Aqui a gente
-  // COMPLETA os campos do decisor que estiverem vazios (sem sobrescrever o que o
-  // BDR já preencheu). Prioriza: já preenchido → sócio 1 da lista → sócio do
-  // quadro societário (maior participação).
+  // COMPLETA os campos do decisor (sem sobrescrever o que o BDR já preencheu) e
+  // GARANTE que nome, cargo, telefone e e-mail nunca fiquem vazios. Prioriza:
+  // já preenchido → sócio 1 da lista → sócio do quadro (maior participação) → gerado.
+  const dominio = `${(lead.empresa || "empresa").toLowerCase().normalize("NFD").replace(DIACRITICS, "").replace(/[^a-z0-9]/g, "").slice(0, 16) || "empresa"}.com.br`;
   const socioTop = [...sociosExtra].sort((a, b) => (parseInt(b.participacao || "0") - parseInt(a.participacao || "0")))[0];
-  const decisorNome = lead.decisorNome || lead.socio1 || socioTop?.nome || "";
-  const firstName = (decisorNome.split(" ")[0] || "contato").toLowerCase().normalize("NFD").replace(/[^a-z]/g, "");
-  const decisorCargo = lead.decisorCargo || (lead.socio1 ? "Sócio(a)" : socioTop?.cargo) || (decisorNome ? "Sócio-administrador" : "");
-  const decisorTel = lead.decisorTel || lead.whatsapp1 || socioTop?.telefone || tels[0]?.numero || "";
-  const decisorEmail = lead.decisorEmail || lead.email || (firstName ? `${firstName}@${(lead.empresa || "empresa").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 14) || "empresa"}.com.br` : emailsExtra[0]) || "";
+  const decisorNome = lead.decisorNome || lead.socio1 || socioTop?.nome || genNome();
+  const firstName = (decisorNome.split(" ")[0] || "contato").toLowerCase().normalize("NFD").replace(/[^a-z]/g, "") || "contato";
+  const decisorCargo = lead.decisorCargo || (lead.socio1 ? "Sócio(a)" : socioTop?.cargo) || "Sócio-administrador";
+  const decisorTel = lead.decisorTel || lead.whatsapp1 || socioTop?.telefone || tels[0]?.numero || genCelular(ddd, rng);
+  const decisorEmail = lead.decisorEmail || lead.email || `${firstName}@${dominio}`;
+  // LinkedIn: só se já existir (não inventa). Se não achar, fica vazio.
+  const decisorLinkedin = lead.decisorLinkedin || "";
 
   return {
     telefonesExtra: tels,
@@ -357,8 +368,8 @@ export function enrichLead(lead: ProspLead): Partial<ProspLead> {
     sociosExtra,
     empresaInfo,
     cnpj: lead.cnpj || genCNPJ(rng),
-    // decisor preenchido automaticamente (só completa gaps)
-    decisorNome, decisorCargo, decisorTel, decisorEmail,
+    // decisor preenchido automaticamente (garante nome/cargo/telefone/email)
+    decisorNome, decisorCargo, decisorTel, decisorEmail, decisorLinkedin,
     enriquecidoEm: new Date().toISOString(),
   };
 }
@@ -612,6 +623,16 @@ const NICHO_MAP: Record<string, NichoInfo> = {
     dores: ["gerar reuniões qualificadas de forma previsível (outbound + inbound)", "encurtar o ciclo de vendas com nutrição e prova de autoridade", "escalar a aquisição com CAC sob controle"],
     prova: "geramos pipeline previsível de reuniões qualificadas pra empresas B2B",
   },
+  energia: {
+    label: "empresas de energia (solar/renováveis)",
+    dores: ["gerar leads qualificados de geração distribuída e reduzir o custo por lead", "encurtar o ciclo de venda de projetos com um funil previsível e prova de ROI", "escalar a captação com autoridade e eficiência de mídia no ticket alto"],
+    prova: "temos cases de energia solar que encheram o funil de projetos qualificados e aceleraram o fechamento",
+  },
+  academia: {
+    label: "academias e negócios de esporte/fitness",
+    dores: ["encher a grade de matrículas com alunos qualificados da região", "reduzir a evasão e aumentar a retenção/recorrência (LTV)", "construir marca e prova social que gerem indicação e turmas cheias"],
+    prova: "ajudamos academias e estúdios a lotar as turmas e reduzir a evasão",
+  },
   generico: {
     label: "empresas como a de vocês",
     dores: ["estruturar a aquisição de clientes de forma previsível (tráfego, funil e conversão)", "profissionalizar o que já roda e destravar o próximo nível de crescimento", "escalar com previsibilidade e reduzir o custo de aquisição"],
@@ -621,6 +642,8 @@ const NICHO_MAP: Record<string, NichoInfo> = {
 function resolveNicho(nicho: string): NichoInfo {
   const n = (nicho || "").toLowerCase();
   if (/saas|tecnolog|software|tech|app/.test(n)) return NICHO_MAP.saas;
+  if (/energ|solar|fotovolt|renov/.test(n)) return NICHO_MAP.energia;
+  if (/academ|esporte|fitness|cross|pilates|estudio|estúdio/.test(n)) return NICHO_MAP.academia;
   if (/saud|saúde|beleza|clinic|clínic|odont|estetic|estétic/.test(n)) return NICHO_MAP.beleza;
   if (/imob|incorpor|constru/.test(n)) return NICHO_MAP.imobiliario;
   if (/varej|commerce|loja|ecom/.test(n)) return NICHO_MAP.varejo;

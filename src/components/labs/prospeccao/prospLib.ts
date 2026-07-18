@@ -58,8 +58,9 @@ export const LEAD_ETAPA_MAP: Record<string, string> = {
 
 // Nichos-preset (o usuário pode adicionar; começa com o imobiliário).
 export const NICHOS = [
-  "Mercado Imobiliário / Incorporadoras", "Varejo / E-commerce", "Serviços B2B", "Saúde / Clínicas",
-  "Educação", "Indústria", "Alimentação / Food Service", "Automotivo", "Outro",
+  "Mercado Imobiliário / Incorporadoras", "SaaS / Tecnologia", "Energia", "Academias / Esportes",
+  "Varejo / E-commerce", "Serviços B2B", "Saúde / Clínicas", "Educação", "Indústria",
+  "Alimentação / Food Service", "Automotivo", "Outro",
 ];
 
 // normaliza header: minúsculo, sem acento, sem pontuação → facilita casar variações
