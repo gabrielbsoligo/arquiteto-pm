@@ -47,7 +47,7 @@ export const ProspeccaoHub: React.FC<HubProps> = ({ teamMembers, closers = [] })
   const [ownerSel, setOwnerSel] = useState<string>("__auto__");
   const [nichoSel, setNichoSel] = useState<string>(NICHOS[0]);
   const [agendarFor, setAgendarFor] = useState<ProspLead | null>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
+  const [showUpload, setShowUpload] = useState(false);
 
   const persist = (next: ProspLead[]) => { setLeads(next); saveLeads(next); };
   const updateLead = (id: string, patch: Partial<ProspLead>) => { const next = leads.map((l) => (l.id === id ? { ...l, ...patch } : l)); persist(next); return next.find((l) => l.id === id)!; };
@@ -66,15 +66,16 @@ export const ProspeccaoHub: React.FC<HubProps> = ({ teamMembers, closers = [] })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [teamNames.join(",")]);
 
-  const handleFiles = async (files: FileList | null) => {
+  const handleFiles = async (files: FileList | null, ownerName: string, nicho: string) => {
     if (!files?.length) return;
+    setOwnerSel(ownerName); setNichoSel(nicho); // lembra a última escolha
+    const owner = ownerName === "__auto__" ? null : ownerName;
     try {
       let added = 0; let matched: string[] = []; let missing: string[] = [];
-      const owner = ownerSel === "__auto__" ? null : ownerSel;
       let acc = [...leads];
       for (const f of Array.from(files)) {
         const batch = f.name.replace(/\.(csv|xlsx?|xls)$/i, "");
-        const res = await parseFile(f, batch, nichoSel, owner);
+        const res = await parseFile(f, batch, nicho, owner);
         matched = res.matched; missing = res.missing;
         const existingIds = new Set(acc.map((l) => l.id));
         const fresh = res.leads.filter((l) => !existingIds.has(l.id));
@@ -82,11 +83,10 @@ export const ProspeccaoHub: React.FC<HubProps> = ({ teamMembers, closers = [] })
         added += fresh.length;
       }
       persist(acc);
-      setBanner({ ok: true, msg: `${added} lead(s) importado(s) · dono: ${owner || "distribuído entre todos"} · nicho: ${nichoSel} · colunas ${matched.length}/13${missing.length ? " · faltando: " + missing.join(", ") : ""}` });
+      setBanner({ ok: true, msg: `${added} lead(s) importado(s) · dono: ${owner || "distribuído entre todos"} · nicho: ${nicho} · colunas ${matched.length}/13${missing.length ? " · faltando: " + missing.join(", ") : ""}` });
     } catch (e: any) {
       setBanner({ ok: false, msg: "Falha ao ler o arquivo: " + (e?.message || e) });
     }
-    if (fileRef.current) fileRef.current.value = "";
   };
 
   const bdrLeads = useMemo(() => leads.filter((l) => bdrFilter === "todos" || l.bdr === bdrFilter), [leads, bdrFilter]);
@@ -144,20 +144,9 @@ export const ProspeccaoHub: React.FC<HubProps> = ({ teamMembers, closers = [] })
           </div>
         </div>
         <div className="flex-1" />
-        {/* dono + nicho + upload */}
-        <select value={ownerSel} onChange={(e) => setOwnerSel(e.target.value)} title="Dono da lista"
-          className="px-2.5 py-2 rounded-lg border border-[var(--color-v4-border)] bg-[var(--color-v4-surface)] text-white text-xs">
-          <option value="__auto__">Distribuir entre todos</option>
-          {teamNames.map((n) => <option key={n} value={n}>Dono: {n}</option>)}
-        </select>
-        <select value={nichoSel} onChange={(e) => setNichoSel(e.target.value)} title="Nicho da lista"
-          className="px-2.5 py-2 rounded-lg border border-[var(--color-v4-border)] bg-[var(--color-v4-surface)] text-white text-xs max-w-[220px]">
-          {NICHOS.map((n) => <option key={n} value={n}>{n}</option>)}
-        </select>
-        <label className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-white text-sm font-semibold cursor-pointer" style={{ background: RED }}>
+        <button onClick={() => setShowUpload(true)} className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-white text-sm font-semibold" style={{ background: RED }}>
           <Upload size={15} /> Subir lista
-          <input ref={fileRef} type="file" accept=".csv,.xls,.xlsx" multiple className="hidden" onChange={(e) => handleFiles(e.target.files)} />
-        </label>
+        </button>
         <button onClick={exportCSV} className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-[var(--color-v4-border)] text-sm font-semibold text-white hover:bg-[var(--color-v4-card-hover)]">
           <Download size={15} /> Exportar
         </button>
@@ -174,7 +163,7 @@ export const ProspeccaoHub: React.FC<HubProps> = ({ teamMembers, closers = [] })
         )}
 
         {leads.length === 0 ? (
-          <EmptyState onPick={() => fileRef.current?.click()} onFiles={handleFiles} />
+          <EmptyState onOpen={() => setShowUpload(true)} />
         ) : (
           <>
             <div className="flex flex-wrap items-center gap-2 mb-4">
@@ -263,6 +252,7 @@ export const ProspeccaoHub: React.FC<HubProps> = ({ teamMembers, closers = [] })
       {open && <LeadPanel lead={open} closers={closers} onClose={() => setOpenId(null)}
         onUpdate={(patch) => updateLead(open.id, patch)} onStatus={(s) => changeStatus(open, s)} />}
       {agendarFor && <AgendarModal lead={agendarFor} closers={closers} onClose={() => setAgendarFor(null)} onConfirm={confirmAgendar} />}
+      {showUpload && <UploadModal team={teamNames} defOwner={ownerSel} defNicho={nichoSel} onClose={() => setShowUpload(false)} onSubmit={handleFiles} />}
     </div>
   );
 };
@@ -291,16 +281,57 @@ const Stars: React.FC<{ value: number; onChange?: (v: number) => void; readOnly?
   </div>
 );
 
-const EmptyState: React.FC<{ onPick: () => void; onFiles: (f: FileList | null) => void }> = ({ onPick, onFiles }) => (
-  <div onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); onFiles(e.dataTransfer.files); }}
-    className="border-2 border-dashed border-[var(--color-v4-border)] rounded-2xl py-16 flex flex-col items-center justify-center text-center">
+const EmptyState: React.FC<{ onOpen: () => void }> = ({ onOpen }) => (
+  <div className="border-2 border-dashed border-[var(--color-v4-border)] rounded-2xl py-16 flex flex-col items-center justify-center text-center">
     <div className="w-14 h-14 rounded-xl flex items-center justify-center mb-4" style={{ background: RED }}><Upload size={26} className="text-white" /></div>
     <h2 className="text-lg font-bold text-white">Suba a lista enriquecida do Lemit</h2>
-    <p className="text-sm text-[var(--color-v4-text-muted)] max-w-md mt-1">Escolha o <b>dono</b> e o <b>nicho</b> no topo, depois arraste o CSV/XLS aqui ou clique. Colunas no padrão Lemit
+    <p className="text-sm text-[var(--color-v4-text-muted)] max-w-md mt-1">Clique em <b>Subir lista</b> pra escolher o <b>dono/responsável</b> e o <b>nicho</b> e enviar o CSV/XLS. Colunas no padrão Lemit
       (NOME EMPRESA, SÓCIO 1/2, WHATSAPP 1/2, EMAIL, SITE, CIDADE, ESTADO, LINKS…).</p>
-    <button onClick={onPick} className="mt-4 px-4 py-2 rounded-lg text-white text-sm font-semibold" style={{ background: RED }}>Selecionar arquivo</button>
+    <button onClick={onOpen} className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-lg text-white text-sm font-semibold" style={{ background: RED }}><Upload size={15} /> Subir lista</button>
   </div>
 );
+
+// ---------------- Modal de Upload: define DONO + NICHO antes de enviar ----------------
+const UploadModal: React.FC<{ team: string[]; defOwner: string; defNicho: string; onClose: () => void; onSubmit: (files: FileList | null, owner: string, nicho: string) => void }> = ({ team, defOwner, defNicho, onClose, onSubmit }) => {
+  const [owner, setOwner] = useState(defOwner);
+  const [nicho, setNicho] = useState(defNicho);
+  const ref = useRef<HTMLInputElement>(null);
+  const submit = (files: FileList | null) => { if (files?.length) { onSubmit(files, owner, nicho); onClose(); } };
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
+      <div className={`relative w-full max-w-md ${card} p-5`}>
+        <div className="flex items-center gap-2 mb-4">
+          <Upload size={16} style={{ color: RED }} /><h3 className="text-sm font-bold text-white">Subir lista de prospecção</h3>
+          <div className="flex-1" /><button onClick={onClose} className="text-[var(--color-v4-text-muted)] hover:text-white"><X size={18} /></button>
+        </div>
+        <div className="space-y-3">
+          <div>
+            <label className="text-[11px] text-[var(--color-v4-text-muted)] uppercase font-semibold">Dono / responsável pela lista *</label>
+            <select value={owner} onChange={(e) => setOwner(e.target.value)} className="w-full mt-1 border border-[var(--color-v4-border)] bg-[var(--color-v4-surface)] text-white rounded-lg px-3 py-2 text-sm">
+              <option value="__auto__">Distribuir entre todos</option>
+              {team.map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-[11px] text-[var(--color-v4-text-muted)] uppercase font-semibold">Nicho da lista</label>
+            <select value={nicho} onChange={(e) => setNicho(e.target.value)} className="w-full mt-1 border border-[var(--color-v4-border)] bg-[var(--color-v4-surface)] text-white rounded-lg px-3 py-2 text-sm">
+              {NICHOS.map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </div>
+          <div onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); submit(e.dataTransfer.files); }}
+            onClick={() => ref.current?.click()}
+            className="border-2 border-dashed border-[var(--color-v4-border)] rounded-xl py-8 flex flex-col items-center gap-2 text-center cursor-pointer hover:border-[var(--color-v4-red)]">
+            <Upload size={22} className="text-[var(--color-v4-text-muted)]" />
+            <p className="text-sm text-white">Arraste o CSV/XLS aqui ou clique</p>
+            <p className="text-[10px] text-[var(--color-v4-text-muted)]">Dono: <b className="text-white">{owner === "__auto__" ? "distribuir entre todos" : owner}</b> · Nicho: <b className="text-white">{nicho}</b></p>
+            <input ref={ref} type="file" accept=".csv,.xls,.xlsx" multiple className="hidden" onChange={(e) => submit(e.target.files)} />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 // ---------------- Modal Agendar ----------------
 const AgendarModal: React.FC<{ lead: ProspLead; closers: Member[]; onClose: () => void; onConfirm: (o: { dataISO: string; closerId?: string; canal: string; closerNome?: string }) => void }> = ({ lead, closers, onClose, onConfirm }) => {
