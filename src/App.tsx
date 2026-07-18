@@ -26,6 +26,7 @@ import { AuditPanel } from "./components/AuditPanel";
 import { BriefingApresentacao } from "./components/BriefingApresentacao";
 import { TVMode } from "./components/TVMode";
 import { LabPerfSdrRoute } from "./components/labs/PerfSdrDashboard";
+import { LabProspeccaoRoute } from "./components/labs/ProspeccaoHub";
 import { RoletaAssignModal } from "./components/RoletaAssignModal";
 import type { Lead } from "./types";
 import { supabase } from "./lib/supabase";
@@ -263,6 +264,7 @@ const MainApp: React.FC = () => {
       case "roleta_historico": return <RoletaHistoricoView />;
       case "perf_sdr": return <PerfSdrView />;
       case "perf_visual": return <LabPerfSdrRoute />;
+      case "prospeccao": return <LabProspeccaoRoute />;
       case "call_quality": return <CallQualityView />;
       case "geral": return <GeralView />;
       case "equipe": return <EquipeView />;
@@ -300,6 +302,15 @@ export default function App() {
           <LabPerfSdrRoute demo={params.get('demo') === '1'} />
         </div>
       </AppProvider>
+    );
+  }
+
+  // Rota standalone do Hub de Prospecção (não precisa de login — dados em localStorage)
+  if (labsView === 'prospeccao') {
+    return (
+      <div className="flex h-screen w-full bg-[var(--color-v4-bg)]">
+        <LabProspeccaoRoute />
+      </div>
     );
   }
 
