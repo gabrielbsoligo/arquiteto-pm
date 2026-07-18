@@ -128,10 +128,24 @@ export interface ProspLead {
   dataReuniao?: string; closerId?: string; closerNome?: string; canal?: string;
   // atividades
   atividades: Touchpoint[];
+  // enriquecimento (Lemit) — puxado na etapa "Enriquecimento"
+  telefonesExtra?: TelefoneExtra[];   // outros telefones/whatsapp além dos principais
+  emailsExtra?: string[];
+  sociosExtra?: SocioExtra[];         // quadro societário / outros contatos
+  empresaInfo?: EmpresaInfo;          // dados cadastrais da empresa
+  enriquecidoEm?: string;             // ISO — quando foi enriquecido
   notas: string;
   batch: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface TelefoneExtra { numero: string; tipo: string; }         // tipo: "Celular/WhatsApp", "Fixo comercial", "Recado"
+export interface SocioExtra { nome: string; cargo?: string; telefone?: string; participacao?: string; }
+export interface EmpresaInfo {
+  porte?: string; naturezaJuridica?: string; atividade?: string; cnae?: string;
+  capitalSocial?: string; dataAbertura?: string; situacao?: string;
+  funcionariosEstimado?: string; faturamentoEstimado?: string;
 }
 
 export const LEMIT_COLUNAS = [
@@ -243,6 +257,108 @@ export function maturidadeMotivo(lead: ProspLead): string {
   const on = pares.filter(([, v]) => v).map(([n]) => n);
   const off = pares.filter(([, v]) => !v).map(([n]) => n);
   return `Presentes: ${on.join(", ") || "nenhum"}${off.length ? ` · Faltam: ${off.join(", ")}` : ""}`;
+}
+
+// ---------------- ENRIQUECIMENTO (Lemit) ----------------
+// PROTÓTIPO: gera dados adicionais de forma DETERMINÍSTICA (a partir de um hash do
+// lead), pra o card ficar nutrido na etapa "Enriquecimento" sem depender de rede.
+// PRODUÇÃO: trocar por uma chamada à API do Lemit por CNPJ (POST /enrich) que
+// devolve exatamente estes campos (telefones, quadro societário, dados cadastrais).
+// A assinatura (enrichLead → Partial<ProspLead>) já está pronta pra isso.
+const PORTES = ["MEI", "ME (Microempresa)", "EPP (Pequeno Porte)", "Média Empresa", "Grande Empresa"];
+const SITUACOES = ["Ativa", "Ativa", "Ativa", "Ativa", "Suspensa"];
+const NAT_JUR = ["Sociedade Empresária Limitada (LTDA)", "Empresário Individual (EI)", "Sociedade Anônima (S.A.)", "Sociedade Limitada Unipessoal (SLU)"];
+const CNAE_POR_NICHO: { re: RegExp; atividade: string; cnae: string }[] = [
+  { re: /saas|tecnolog|software|tech|app/, atividade: "Desenvolvimento de software sob encomenda", cnae: "6201-5/01" },
+  { re: /saud|saúde|beleza|clinic|clínic|estetic|estétic|odont/, atividade: "Atividades de atenção à saúde / estética", cnae: "8630-5/03" },
+  { re: /imob|incorpor|constru/, atividade: "Incorporação de empreendimentos imobiliários", cnae: "4110-7/00" },
+  { re: /varej|commerce|loja|ecom/, atividade: "Comércio varejista", cnae: "4712-1/00" },
+  { re: /b2b|servi/, atividade: "Atividades de consultoria em gestão empresarial", cnae: "7020-4/00" },
+];
+const SOCIO_NOMES = ["Ricardo", "Fernanda", "Marcelo", "Patrícia", "André", "Juliana", "Roberto", "Camila", "Eduardo", "Beatriz"];
+const SOCIO_SOBRENOMES = ["Menezes", "Tavares", "Barbosa", "Cardoso", "Moreira", "Nogueira", "Pires", "Ramos"];
+const SOCIO_CARGOS = ["Sócio-administrador", "Sócia", "Sócio", "Sócio-diretor"];
+
+// PRNG determinístico simples (mulberry32) a partir de uma seed inteira.
+function seededRng(seed: number) { let a = seed >>> 0; return () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+function detectDDD(lead: ProspLead): string {
+  const d = onlyDigits(lead.whatsapp1 || lead.whatsapp2 || lead.decisorTel || "");
+  const semPais = d.startsWith("55") ? d.slice(2) : d;
+  return semPais.length >= 10 ? semPais.slice(0, 2) : "12"; // 12 = São José dos Campos / Vale do Paraíba
+}
+function genCelular(ddd: string, rng: () => number): string {
+  let n = "9"; for (let i = 0; i < 8; i++) n += Math.floor(rng() * 10);
+  return `(${ddd}) ${n.slice(0, 5)}-${n.slice(5)}`;
+}
+function genFixo(ddd: string, rng: () => number): string {
+  let n = String(2 + Math.floor(rng() * 3)); for (let i = 0; i < 7; i++) n += Math.floor(rng() * 10);
+  return `(${ddd}) ${n.slice(0, 4)}-${n.slice(4)}`;
+}
+function genCNPJ(rng: () => number): string {
+  let s = ""; for (let i = 0; i < 14; i++) s += Math.floor(rng() * 10);
+  return `${s.slice(0, 2)}.${s.slice(2, 5)}.${s.slice(5, 8)}/${s.slice(8, 12)}-${s.slice(12)}`;
+}
+
+/** Simula o enriquecimento do Lemit por CNPJ. Determinístico por lead. */
+export function enrichLead(lead: ProspLead): Partial<ProspLead> {
+  const seed = Math.abs(hashStr(lead.empresa + lead.cnpj + lead.id + lead.cidade));
+  const rng = seededRng(seed);
+  const ddd = detectDDD(lead);
+
+  // telefones adicionais (o pedido principal): 3–4 novos, sem repetir os que já existem
+  const jaTem = new Set([lead.whatsapp1, lead.whatsapp2, lead.decisorTel].map(onlyDigits).filter(Boolean));
+  const tels: TelefoneExtra[] = [];
+  const tentar = (numero: string, tipo: string) => { if (!jaTem.has(onlyDigits(numero))) { jaTem.add(onlyDigits(numero)); tels.push({ numero, tipo }); } };
+  tentar(genCelular(ddd, rng), "Celular/WhatsApp");
+  tentar(genCelular(ddd, rng), "Celular/WhatsApp");
+  tentar(genFixo(ddd, rng), "Fixo comercial");
+  if (rng() > 0.5) tentar(genCelular(ddd, rng), "Recado (recepção)");
+
+  // sócios adicionais (quadro societário) com telefone próprio
+  const nExtra = 1 + Math.floor(rng() * 2); // 1..2
+  const sociosExtra: SocioExtra[] = [];
+  const usados = new Set([lead.socio1, lead.socio2, lead.decisorNome].filter(Boolean));
+  for (let i = 0; i < nExtra; i++) {
+    const nome = `${SOCIO_NOMES[Math.floor(rng() * SOCIO_NOMES.length)]} ${SOCIO_SOBRENOMES[Math.floor(rng() * SOCIO_SOBRENOMES.length)]}`;
+    if (usados.has(nome)) continue; usados.add(nome);
+    sociosExtra.push({ nome, cargo: SOCIO_CARGOS[Math.floor(rng() * SOCIO_CARGOS.length)], telefone: genCelular(ddd, rng), participacao: `${10 + Math.floor(rng() * 80)}%` });
+  }
+
+  const cn = CNAE_POR_NICHO.find((c) => c.re.test((lead.nicho || "").toLowerCase()));
+  const ano = 1998 + Math.floor(rng() * 25);
+  const empresaInfo: EmpresaInfo = {
+    porte: PORTES[Math.floor(rng() * PORTES.length)],
+    naturezaJuridica: NAT_JUR[Math.floor(rng() * NAT_JUR.length)],
+    atividade: cn?.atividade || "Atividades empresariais",
+    cnae: cn?.cnae || "8299-7/99",
+    capitalSocial: `R$ ${(10 + Math.floor(rng() * 490)).toLocaleString("pt-BR")}.000,00`,
+    dataAbertura: `${String(1 + Math.floor(rng() * 28)).padStart(2, "0")}/${String(1 + Math.floor(rng() * 12)).padStart(2, "0")}/${ano}`,
+    situacao: SITUACOES[Math.floor(rng() * SITUACOES.length)],
+    funcionariosEstimado: ["1–5", "6–10", "11–25", "26–50", "51–100", "100+"][Math.floor(rng() * 6)],
+    faturamentoEstimado: ["até R$ 360 mil/ano", "R$ 360 mil – R$ 1 mi", "R$ 1 mi – R$ 5 mi", "R$ 5 mi – R$ 20 mi", "R$ 20 mi+"][Math.floor(rng() * 5)],
+  };
+
+  return {
+    telefonesExtra: tels,
+    emailsExtra: [`comercial@${(lead.empresa || "empresa").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 14) || "empresa"}.com.br`],
+    sociosExtra,
+    empresaInfo,
+    cnpj: lead.cnpj || genCNPJ(rng),
+    enriquecidoEm: new Date().toISOString(),
+  };
+}
+
+/** Todos os telefones do lead (principais + decisor + extras + sócios), sem repetir. */
+export function allPhones(lead: ProspLead): { numero: string; tipo: string }[] {
+  const out: { numero: string; tipo: string }[] = [];
+  const seen = new Set<string>();
+  const push = (numero: string, tipo: string) => { const k = onlyDigits(numero); if (numero && !seen.has(k)) { seen.add(k); out.push({ numero, tipo }); } };
+  push(lead.decisorTel, "Decisor");
+  push(lead.whatsapp1, "WhatsApp 1");
+  push(lead.whatsapp2, "WhatsApp 2");
+  (lead.telefonesExtra || []).forEach((t) => push(t.numero, t.tipo));
+  (lead.sociosExtra || []).forEach((s) => s.telefone && push(s.telefone, `Sócio: ${s.nome.split(" ")[0]}`));
+  return out;
 }
 
 // ---------------- links / click-to-call ----------------

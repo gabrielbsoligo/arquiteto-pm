@@ -7,10 +7,11 @@ import {
   Download, Phone, MessageCircle, Star, Globe, Instagram, Facebook, Linkedin, Youtube,
   MapPin, Search, Sparkles, X, Building2, Copy, Check, ClipboardList, Users, Trash2, Calendar, Clock,
   LayoutGrid, Table2, BarChart3, Plus, UserCheck, Activity, AlertTriangle, TrendingUp, Beaker, Rocket,
+  Database, RefreshCw, Briefcase, Users2,
 } from "lucide-react";
 import { useAppStore } from "../../store";
 import {
-  loadLeads, saveLeads, markDismissed, channelLink, telLink, callLink, whatsappLink,
+  loadLeads, saveLeads, markDismissed, channelLink, telLink, callLink, whatsappLink, enrichLead, allPhones,
   generateApproach, toCSV, downloadCSV, canMoveTo, funnelMetrics, listQuality, maturityConversion, bdrProductivity,
   STATUS_LABELS, STATUS_ORDER, STATUS_HINT, STATUS_COLOR, NIVEIS, MOTIVOS_PERDA,
   ATIVIDADE_TIPOS, ATIVIDADE_RESULTADOS, tipoLabel, resultadoLabel, maturidadeMotivo, maturidadeBanda, nivelToNum,
@@ -122,7 +123,23 @@ export const HubOutbound: React.FC<HubProps> = ({ teamMembers, closers = [] }) =
       return;
     }
     if (to === "perdido") { setPerdaFor(lead); return; } // modal coleta motivo (obrigatório)
+    // ao ENTRAR em Enriquecimento, puxa mais dados do Lemit (se ainda não puxou)
+    if (to === "enriquecimento" && !lead.enriquecidoEm) {
+      const dados = enrichLead(lead);
+      updateLead(lead.id, { status: to, ...dados });
+      const n = (dados.telefonesExtra?.length || 0) + (dados.sociosExtra?.length || 0);
+      setBanner({ ok: true, msg: `${lead.empresa}: enriquecido via Lemit — +${dados.telefonesExtra?.length || 0} telefone(s), +${dados.sociosExtra?.length || 0} sócio(s) e dados cadastrais.` });
+      void n;
+      return;
+    }
     updateLead(lead.id, { status: to });
+  };
+
+  // enriquecer manualmente (botão no painel) — re-puxa do Lemit
+  const enrich = (lead: ProspLead) => {
+    const dados = enrichLead(lead);
+    updateLead(lead.id, dados);
+    setBanner({ ok: true, msg: `${lead.empresa}: dados do Lemit atualizados — ${dados.telefonesExtra?.length || 0} telefone(s) extra, ${dados.sociosExtra?.length || 0} sócio(s), dados cadastrais.` });
   };
 
   const onDragEnd = (r: DropResult) => {
@@ -229,7 +246,7 @@ export const HubOutbound: React.FC<HubProps> = ({ teamMembers, closers = [] }) =
       </div>
 
       {open && <LeadPanel lead={open} closers={closers} onClose={() => setOpenId(null)}
-        onUpdate={(patch) => updateLead(open.id, patch)} onMove={(s) => moveLead(open, s)} onAddAtividade={(tp) => addAtividade(open, tp)} />}
+        onUpdate={(patch) => updateLead(open.id, patch)} onMove={(s) => moveLead(open, s)} onAddAtividade={(tp) => addAtividade(open, tp)} onEnrich={() => enrich(open)} />}
       {agendarFor && <AgendarModal lead={agendarFor} closers={closers} onClose={() => setAgendarFor(null)} onConfirm={confirmAgendar} />}
       {perdaFor && <PerdaModal lead={perdaFor} onClose={() => setPerdaFor(null)} onConfirm={confirmPerda} />}
     </div>
@@ -287,6 +304,17 @@ const KanbanBoard: React.FC<{ leads: ProspLead[]; onDragEnd: (r: DropResult) => 
                             {l.decisorNome && <div className="text-[10.5px] text-[var(--color-v4-text-muted)] flex items-center gap-1 mt-0.5"><UserCheck size={10} />{l.decisorNome}{l.decisorCargo ? ` · ${l.decisorCargo}` : ""}</div>}
                             {l.status === "reuniao_agendada" && l.dataReuniao && <div className="text-[10px] mt-1" style={{ color: STATUS_COLOR.reuniao_agendada }}>📅 {new Date(l.dataReuniao).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</div>}
                             {l.status === "perdido" && l.motivoPerda && <div className="text-[10px] mt-1 text-red-400">✕ {l.motivoPerda}</div>}
+                            {l.enriquecidoEm && (
+                              <div className="mt-1.5 rounded-md bg-[var(--color-v4-card)] border border-[var(--color-v4-border)] px-1.5 py-1 space-y-0.5">
+                                <div className="flex items-center gap-1 text-[9px] font-semibold" style={{ color: RED }}><Database size={9} /> LEMIT ✓{l.empresaInfo?.porte ? ` · ${l.empresaInfo.porte}` : ""}</div>
+                                <div className="flex items-center gap-2 text-[9.5px] text-[var(--color-v4-text-muted)]">
+                                  <span className="inline-flex items-center gap-0.5"><Phone size={9} />{allPhones(l).length} tel</span>
+                                  <span className="inline-flex items-center gap-0.5"><Users2 size={9} />{1 + (l.sociosExtra?.length || 0)} sócio(s)</span>
+                                </div>
+                                {l.empresaInfo?.atividade && <div className="text-[9px] text-[var(--color-v4-text-muted)] truncate">{l.empresaInfo.atividade}</div>}
+                              </div>
+                            )}
+                            {l.status === "enriquecimento" && !l.enriquecidoEm && <div className="text-[9.5px] mt-1 text-amber-400 flex items-center gap-1"><RefreshCw size={9} /> enriquecendo via Lemit…</div>}
                             <div className="flex items-center justify-between mt-1.5">
                               <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-[var(--color-v4-card)] border border-[var(--color-v4-border)] text-[var(--color-v4-text-muted)]">{l.bdr || "—"}</span>
                               <Stars value={l.maturidade} readOnly small />
@@ -628,7 +656,7 @@ const PerdaModal: React.FC<{ lead: ProspLead; onClose: () => void; onConfirm: (m
 };
 
 // ---------------- Painel do Lead ----------------
-const LeadPanel: React.FC<{ lead: ProspLead; closers: Member[]; onClose: () => void; onUpdate: (patch: Partial<ProspLead>) => void; onMove: (s: Status) => void; onAddAtividade: (tp: Omit<Touchpoint, "id">) => void }> = ({ lead, onClose, onUpdate, onMove, onAddAtividade }) => {
+const LeadPanel: React.FC<{ lead: ProspLead; closers: Member[]; onClose: () => void; onUpdate: (patch: Partial<ProspLead>) => void; onMove: (s: Status) => void; onAddAtividade: (tp: Omit<Touchpoint, "id">) => void; onEnrich: () => void }> = ({ lead, onClose, onUpdate, onMove, onAddAtividade, onEnrich }) => {
   const [copied, setCopied] = useState(false);
   const links = [
     { kind: "site", label: "Site", Icon: Globe }, { kind: "instagram", label: "Instagram", Icon: Instagram },
@@ -682,18 +710,22 @@ const LeadPanel: React.FC<{ lead: ProspLead; closers: Member[]; onClose: () => v
             </div>
           </div>
 
-          {/* click-to-call (empresa + decisor) */}
+          {/* ENRIQUECIMENTO (Lemit) */}
+          <EnriquecimentoBox lead={lead} onEnrich={onEnrich} />
+
+          {/* click-to-call — TODOS os telefones (principais + decisor + extras + sócios) */}
           <div>
-            <p className="text-[11px] font-semibold text-[var(--color-v4-text-muted)] uppercase mb-1.5">Contato — click-to-call</p>
-            <div className="flex flex-wrap gap-2">
-              {[lead.decisorTel, lead.whatsapp1, lead.whatsapp2].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).map((ph, i) => (
-                <div key={i} className="inline-flex items-center rounded-lg border border-[var(--color-v4-border)] overflow-hidden">
-                  <a href={telLink(ph)} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-semibold text-white" style={{ background: RED }}><Phone size={13} /> {ph}</a>
-                  <a href={callLink(ph)} title="Discar via API4COM (requer app 4COM)" className="px-2 py-1.5 text-[10px] text-[var(--color-v4-text-muted)] hover:text-white border-l border-[var(--color-v4-border)]">4COM</a>
-                  <a href={whatsappLink(ph)} target="_blank" rel="noopener" className="inline-flex items-center gap-1 px-2.5 py-1.5 text-sm text-green-400 hover:bg-[var(--color-v4-surface)] border-l border-[var(--color-v4-border)]"><MessageCircle size={14} /></a>
+            <p className="text-[11px] font-semibold text-[var(--color-v4-text-muted)] uppercase mb-1.5 flex items-center gap-1.5"><Phone size={12} /> Telefones — click-to-call <span className="normal-case font-normal text-[10px]">({allPhones(lead).length})</span></p>
+            <div className="flex flex-col gap-2">
+              {allPhones(lead).map((ph, i) => (
+                <div key={i} className="inline-flex items-center rounded-lg border border-[var(--color-v4-border)] overflow-hidden w-fit">
+                  <span className="text-[9px] uppercase tracking-wide text-[var(--color-v4-text-muted)] px-2 py-1.5 border-r border-[var(--color-v4-border)] bg-[var(--color-v4-surface)] min-w-[92px]">{ph.tipo}</span>
+                  <a href={telLink(ph.numero)} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-semibold text-white" style={{ background: RED }}><Phone size={13} /> {ph.numero}</a>
+                  <a href={callLink(ph.numero)} title="Discar via API4COM (requer app 4COM)" className="px-2 py-1.5 text-[10px] text-[var(--color-v4-text-muted)] hover:text-white border-l border-[var(--color-v4-border)]">4COM</a>
+                  <a href={whatsappLink(ph.numero)} target="_blank" rel="noopener" className="inline-flex items-center gap-1 px-2.5 py-1.5 text-sm text-green-400 hover:bg-[var(--color-v4-surface)] border-l border-[var(--color-v4-border)]"><MessageCircle size={14} /></a>
                 </div>
               ))}
-              {!lead.decisorTel && !lead.whatsapp1 && !lead.whatsapp2 && <span className="text-sm text-[var(--color-v4-text-muted)]">Sem telefone.</span>}
+              {allPhones(lead).length === 0 && <span className="text-sm text-[var(--color-v4-text-muted)]">Sem telefone. Mova pra “Enriquecimento” pra puxar do Lemit.</span>}
             </div>
           </div>
 
@@ -771,6 +803,66 @@ const LeadPanel: React.FC<{ lead: ProspLead; closers: Member[]; onClose: () => v
 };
 
 // ---------------- Atividades (registro + histórico) ----------------
+// ---------------- Enriquecimento (Lemit) ----------------
+const EnriquecimentoBox: React.FC<{ lead: ProspLead; onEnrich: () => void }> = ({ lead, onEnrich }) => {
+  const info = lead.empresaInfo;
+  const rows: [string, string | undefined][] = [
+    ["CNPJ", lead.cnpj], ["Porte", info?.porte], ["Situação", info?.situacao], ["Natureza jurídica", info?.naturezaJuridica],
+    ["Atividade (CNAE)", info?.atividade ? `${info.atividade}${info.cnae ? ` (${info.cnae})` : ""}` : undefined],
+    ["Capital social", info?.capitalSocial], ["Abertura", info?.dataAbertura],
+    ["Funcionários (est.)", info?.funcionariosEstimado], ["Faturamento (est.)", info?.faturamentoEstimado],
+  ];
+  return (
+    <div className={`${card} p-4`}>
+      <div className="flex items-center gap-2 mb-2">
+        <Database size={15} style={{ color: RED }} />
+        <p className="text-sm font-bold text-white">Enriquecimento <span className="text-[11px] font-normal text-[var(--color-v4-text-muted)]">· Lemit</span></p>
+        <div className="flex-1" />
+        <button onClick={onEnrich} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-white text-xs font-semibold" style={{ background: RED }}>
+          <RefreshCw size={12} /> {lead.enriquecidoEm ? "Re-enriquecer" : "Enriquecer via Lemit"}
+        </button>
+      </div>
+      {!lead.enriquecidoEm ? (
+        <p className="text-[12px] text-[var(--color-v4-text-muted)]">Puxe do Lemit os dados cadastrais da empresa, o quadro societário e <b className="text-white">telefones/WhatsApp adicionais</b>. (Acontece automático ao mover o card pra <b className="text-white">Enriquecimento</b>.)</p>
+      ) : (
+        <div className="space-y-3">
+          {/* dados cadastrais */}
+          <div>
+            <p className="text-[10px] font-semibold text-[var(--color-v4-text-muted)] uppercase mb-1 flex items-center gap-1"><Briefcase size={11} /> Dados da empresa</p>
+            <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+              {rows.filter(([, v]) => v).map(([k, v]) => (
+                <div key={k} className="text-[12px]"><span className="text-[var(--color-v4-text-muted)]">{k}: </span><span className="text-white">{v}</span></div>
+              ))}
+            </div>
+          </div>
+          {/* sócios extras */}
+          {(lead.sociosExtra?.length || 0) > 0 && (
+            <div>
+              <p className="text-[10px] font-semibold text-[var(--color-v4-text-muted)] uppercase mb-1 flex items-center gap-1"><Users2 size={11} /> Quadro societário</p>
+              <div className="space-y-1">
+                {lead.sociosExtra!.map((s, i) => (
+                  <div key={i} className="flex items-center gap-2 text-[12px] px-2.5 py-1.5 rounded-lg bg-[var(--color-v4-surface)] border border-[var(--color-v4-border)]">
+                    <UserCheck size={12} className="text-[var(--color-v4-text-muted)]" />
+                    <span className="text-white font-medium">{s.nome}</span>
+                    {s.cargo && <span className="text-[var(--color-v4-text-muted)] text-[10.5px]">{s.cargo}</span>}
+                    {s.participacao && <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--color-v4-card)] text-[var(--color-v4-text-muted)]">{s.participacao}</span>}
+                    {s.telefone && <a href={telLink(s.telefone)} className="ml-auto inline-flex items-center gap-1 text-[11px] font-semibold" style={{ color: RED }}><Phone size={11} />{s.telefone}</a>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {/* e-mails extras */}
+          {(lead.emailsExtra?.length || 0) > 0 && (
+            <div className="text-[12px]"><span className="text-[var(--color-v4-text-muted)]">Outros e-mails: </span><span className="text-white">{lead.emailsExtra!.join(", ")}</span></div>
+          )}
+          <p className="text-[10px] text-[var(--color-v4-text-muted)] opacity-70">Enriquecido em {new Date(lead.enriquecidoEm).toLocaleString("pt-BR")} · protótipo (dados simulados). Em produção vem da API do Lemit por CNPJ.</p>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const AtividadesBox: React.FC<{ lead: ProspLead; onAdd: (tp: Omit<Touchpoint, "id">) => void }> = ({ lead, onAdd }) => {
   const [tipo, setTipo] = useState<AtividadeTipo>("cold_call");
   const [resultado, setResultado] = useState<AtividadeResultado>("nao_atendeu");
@@ -864,7 +956,9 @@ function seedDemo(team: string[]): ProspLead[] {
       atividades, notas: "", batch: "exemplo", createdAt: new Date(now - (i + 5) * 864e5).toISOString(), updatedAt: new Date(now - (i % 5) * 864e5).toISOString(),
     });
   }
-  return out;
+  // leads a partir de "Enriquecimento" já vêm enriquecidos (como se tivessem passado pela etapa)
+  const enriched = new Set<Status>(["enriquecimento", "prospeccao_ativa", "conectado", "qualificado", "reuniao_agendada", "reuniao_realizada", "fechado"]);
+  return out.map((l) => (enriched.has(l.status) ? { ...l, ...enrichLead(l) } : l));
 }
 
 // ---------------- Route ----------------

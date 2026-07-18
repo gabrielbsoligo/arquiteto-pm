@@ -61,7 +61,34 @@ create index on empresa (status);
 create index on empresa (origem_lista);
 create index on empresa (nicho, maturidade_nivel);
 
--- ============ CONTATO (DECISOR) ============
+-- ============ ENRIQUECIMENTO (Lemit) ============
+-- Dados cadastrais adicionais da empresa (puxados na etapa "Enriquecimento").
+alter table empresa
+  add column porte             text,
+  add column natureza_juridica text,
+  add column atividade         text,   -- CNAE descrição
+  add column cnae              text,
+  add column capital_social    text,
+  add column data_abertura     date,
+  add column situacao          text,
+  add column funcionarios_est  text,
+  add column faturamento_est   text,
+  add column enriquecido_em     timestamptz;   -- quando o Lemit foi consultado
+
+-- Telefones (o pedido principal: vários números por empresa/sócio).
+create type telefone_tipo as enum ('celular_whatsapp','fixo_comercial','recado','decisor');
+create table telefone (
+  id          uuid primary key default gen_random_uuid(),
+  empresa_id  uuid not null references empresa(id) on delete cascade,
+  contato_id  uuid references contato(id) on delete set null,  -- se for de um sócio específico
+  numero      text not null,
+  tipo        telefone_tipo not null default 'celular_whatsapp',
+  origem      text,                                            -- "lista" | "lemit"
+  created_at  timestamptz not null default now()
+);
+create index on telefone (empresa_id);
+
+-- ============ CONTATO (DECISOR / SÓCIOS) ============
 create table contato (
   id          uuid primary key default gen_random_uuid(),
   empresa_id  uuid not null references empresa(id) on delete cascade,
@@ -246,3 +273,9 @@ No protótipo essas três consultas estão implementadas em JS puro em `prospLib
 4. Trocar `generateApproach()` (regras por nicho) por chamada OpenAI/Claude.
 5. Integrar `data_reuniao`/`closer_id` com a agenda (Google Calendar) e a tela Reuniões do SalesHub.
 6. Discagem nativa API4COM via HTTP API + token (hoje é link `tel:`/protocolo).
+7. **Enriquecimento**: trocar `enrichLead()` (simulação determinística) por uma
+   chamada à **API do Lemit por CNPJ** na entrada da etapa "Enriquecimento" — o
+   retorno preenche `empresa` (dados cadastrais), `telefone` (vários números) e
+   `contato` (quadro societário). A assinatura `enrichLead → Partial<Lead>` já
+   está pronta pra isso; o disparo automático acontece ao mover o card pra
+   "Enriquecimento" (e há botão manual "Re-enriquecer" no painel).
