@@ -7,7 +7,7 @@ import {
 import { useAppStore } from "../../store";
 import {
   parseFile, loadLeads, saveLeads, channelLink, telLink, callLink, whatsappLink,
-  generateApproach, toCSV, downloadCSV, dedupeByCompany, enrichProsp, distributeQualified, isIncompleto, allPhonesProsp, resolveCompanyName,
+  generateApproach, toCSV, downloadCSV, dedupeByCompany, enrichProsp, distributeQualified, isIncompleto, allPhonesProsp, fixCompanyName,
   STATUS_LABELS, STATUS_ORDER, NICHOS, maturidadeMotivo, type ProspLead, type ReqCampo,
 } from "./prospeccao/prospLib";
 import { pushToHub } from "./hubOutbound/hubLib";
@@ -101,13 +101,13 @@ export const ProspeccaoHub: React.FC<HubProps> = ({ teamMembers, closers = [] })
       const novos = unificados.filter((l) => !existingIds.has(l.id));
       // 2) ENRIQUECE no Lemit (dados cadastrais + telefones + quadro societário + decisor)
       const enriquecidos = novos.map((l) => ({ ...enrichProsp(l), enviadoHub: false, updatedAt: new Date().toISOString() }));
-      // 2b) INTELIGÊNCIA de NOME: garante nome de EMPRESA (site/email/CNPJ) — não nome de pessoa
+      // 2b) INTELIGÊNCIA de NOME: garante nome de EMPRESA (site/email/CNPJ) e move pessoa p/ sócios
       let corrigidos = 0; let suspeitos = 0;
       const comNome = enriquecidos.map((l) => {
-        const r = resolveCompanyName(l);
-        if (r.fonte !== "lista") corrigidos++;
-        if (r.suspeito) suspeitos++;
-        return { ...l, empresa: r.nome, nomeFonte: r.fonte, nomeSuspeito: r.suspeito };
+        const fx = fixCompanyName(l);
+        if (fx.nomeFonte && fx.nomeFonte !== "lista") corrigidos++;
+        if (fx.nomeSuspeito) suspeitos++;
+        return fx;
       });
       // 3) DIVISÃO QUALIFICADA entre os donos escolhidos
       const assigned = distributeQualified(comNome, alvo);
@@ -186,7 +186,8 @@ export const ProspeccaoHub: React.FC<HubProps> = ({ teamMembers, closers = [] })
     const pendentes = leads.filter((l) => !l.enviadoHub);
     if (!pendentes.length) { setBanner({ ok: false, msg: "Nada em revisão pra enviar." }); return; }
     const nowIso = new Date().toISOString();
-    const redistribuidos = distributeQualified(pendentes, alvo).map((l) => ({ ...l, enviadoHub: true, updatedAt: nowIso }));
+    // rede de segurança: corrige nome de empresa (mesmo em listas subidas antes do ajuste)
+    const redistribuidos = distributeQualified(pendentes.map(fixCompanyName), alvo).map((l) => ({ ...l, enviadoHub: true, updatedAt: nowIso }));
     const byId = new Map(redistribuidos.map((l) => [l.id, l]));
     // 1) marca como enviado na Prospecção  2) grava DIRETO no Hub (entrega garantida)
     persist(leads.map((l) => byId.get(l.id) || l));

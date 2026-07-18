@@ -404,14 +404,23 @@ export function dedupeByCompany(leads: ProspLead[]): ProspLead[] {
 // Aqui a gente resolve pra um nome de EMPRESA de verdade antes de ir pro Hub.
 const EMAIL_GENERICO = /@(gmail|hotmail|outlook|yahoo|icloud|bol|uol|terra|live|msn|me)\./i;
 const EMPRESA_KW = /ltda|eireli|\bs\.?a\.?\b|\bme\b|epp|mei|incorpor|constru|tech|softwar|sistemas|comerci|com[eé]rcio|ind[uú]stri|servi[çc]|clinic|cl[íi]nica|academia|consultor|assessoria|associa|escola|col[eé]gio|restaurante|padaria|auto\s|autope|mercad|loja|studio|est[uú]dio|group|holding|solu[çc]|imobili|transport|log[íi]stic|contabil|advocac|engenh|distribuidora|farm[aá]ci|pet\b|odonto|estetic|est[eé]tica|energ|solar|fitness/i;
+// dicionário de nomes próprios comuns (BR) + conectores → detecta nome de PESSOA
+const PRIMEIROS_NOMES = new Set(["joao", "joão", "jose", "josé", "maria", "ana", "antonio", "antônio", "francisco", "carlos", "paulo", "pedro", "lucas", "luiz", "luis", "marcos", "marcelo", "rafael", "marcio", "márcio", "bruno", "eduardo", "felipe", "rodrigo", "gustavo", "gabriel", "guilherme", "ricardo", "fernando", "fabio", "fábio", "alexandre", "leonardo", "andre", "andré", "sergio", "sérgio", "roberto", "jorge", "mateus", "matheus", "thiago", "tiago", "vinicius", "vinícius", "diego", "leandro", "william", "wesley", "wagner", "renato", "rogerio", "rogério", "claudio", "cláudio", "julio", "júlio", "cesar", "césar", "henrique", "igor", "ivan", "junior", "júnior", "otavio", "otávio", "vitor", "victor", "caio", "davi", "david", "samuel", "arthur", "artur", "bernardo", "murilo", "miguel", "heitor", "hugo", "erick", "edric", "juliana", "patricia", "patrícia", "fernanda", "aline", "amanda", "bruna", "camila", "carla", "carolina", "cristiane", "daniela", "debora", "débora", "elaine", "fabiana", "gabriela", "isabela", "jessica", "jéssica", "larissa", "lary", "leticia", "letícia", "luana", "lucia", "lúcia", "luiza", "mariana", "michele", "monica", "mônica", "natalia", "natália", "paula", "priscila", "rafaela", "renata", "roberta", "sabrina", "sandra", "simone", "tatiane", "vanessa", "vitoria", "vitória", "beatriz", "bianca", "elisa", "rita", "sonia", "sônia", "angela", "ângela", "adriana", "andrea", "andréa", "viviane", "rocha", "souza", "silva"]);
+const CONECTORES = new Set(["da", "de", "do", "dos", "das", "e"]);
 /** o texto parece nome de PESSOA (e não de empresa)? */
 function pareceNomePessoa(nome: string, lead: ProspLead): boolean {
   const n = (nome || "").trim();
   if (!n) return true;
   if (EMPRESA_KW.test(n)) return false;                       // tem marca de empresa → é empresa
+  if (/[0-9&@/]/.test(n)) return false;                        // dígitos/& → empresa
   const socios = [lead.socio1, lead.socio2, lead.decisorNome].filter(Boolean).map((s) => s.toLowerCase().trim());
   if (socios.includes(n.toLowerCase())) return true;          // igual a um sócio → é pessoa
-  return false;                                               // na dúvida, mantém como está
+  const tokens = n.toLowerCase().split(/\s+/);
+  if (tokens.length < 2 || tokens.length > 5) return false;   // 1 palavra ou muito longo → trata como empresa
+  if (PRIMEIROS_NOMES.has(tokens[0])) return true;            // começa com nome próprio comum
+  if (tokens.some((t) => CONECTORES.has(t))) return true;     // "Fulano da Silva"
+  // 2 palavras, ambas "nome-like" e nenhuma é palavra de empresa → provável pessoa
+  return false;
 }
 /** deixa "paoquente.com.br"/"contato@techvale.com" → "Paoquente" / "Techvale" */
 function nomeDeDominio(url: string): string {
@@ -422,27 +431,33 @@ function nomeDeDominio(url: string): string {
   return root.replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 /**
- * Resolve o nome da empresa. Ordem: nome válido da lista → domínio do site →
- * domínio do e-mail (não genérico) → consulta CNPJ (protótipo: razão social
- * simulada, rotulada) → mantém o que tem e sinaliza p/ verificação.
+ * Resolve o nome da empresa — NUNCA deixa nome de pessoa na empresa.
+ * Ordem: nome válido da lista → domínio do site → domínio do e-mail (não genérico)
+ * → consulta CNPJ (protótipo: razão social simulada por ramo+cidade; produção: API
+ * por CNPJ) → placeholder "(verificar)". Devolve `pessoa` = o nome de pessoa que
+ * estava indevidamente na empresa, pra virar sócio.
  */
-export function resolveCompanyName(lead: ProspLead): { nome: string; fonte: NonNullable<ProspLead["nomeFonte"]>; suspeito: boolean } {
+export function resolveCompanyName(lead: ProspLead): { nome: string; fonte: NonNullable<ProspLead["nomeFonte"]>; suspeito: boolean; pessoa?: string } {
   const atual = (lead.empresa || "").trim();
-  if (atual && !pareceNomePessoa(atual, lead)) return { nome: atual, fonte: "lista", suspeito: false };
+  const eraPessoa = pareceNomePessoa(atual, lead);
+  if (atual && !eraPessoa) return { nome: atual, fonte: "lista", suspeito: false };
+  const pessoa = atual && eraPessoa ? atual : undefined; // nome de pessoa que estava na empresa
   // 1) domínio do site
   const bySite = lead.site ? nomeDeDominio(lead.site) : "";
-  if (bySite) return { nome: bySite, fonte: "site", suspeito: false };
+  if (bySite) return { nome: bySite, fonte: "site", suspeito: false, pessoa };
   // 2) domínio do e-mail (não genérico)
   if (lead.email && !EMAIL_GENERICO.test(lead.email)) {
     const byMail = nomeDeDominio(lead.email);
-    if (byMail) return { nome: byMail, fonte: "email", suspeito: false };
+    if (byMail) return { nome: byMail, fonte: "email", suspeito: false, pessoa };
   }
-  // 3) CNPJ → razão social (PROTÓTIPO simulado; produção: API ReceitaWS/CNPJ.ws por CNPJ)
+  // 3) CNPJ → razão social (PROTÓTIPO por ramo+cidade; produção: API ReceitaWS/CNPJ.ws por CNPJ)
   if (onlyDigits(lead.cnpj || "").length >= 11) {
-    return { nome: razaoSocialSimulada(lead), fonte: "cnpj", suspeito: false };
+    return { nome: razaoSocialSimulada(lead), fonte: "cnpj", suspeito: false, pessoa };
   }
-  // 4) não deu — mantém e sinaliza
-  return { nome: atual || (lead.socio1 || "Empresa sem nome"), fonte: "pessoa", suspeito: true };
+  // 4) não deu — placeholder de empresa (NUNCA nome de pessoa) + sinaliza
+  const ramo = (RAMO_POR_NICHO.find(([re]) => re.test((lead.nicho || "").toLowerCase())) || [null, "Empresa"])[1];
+  const loc = (lead.cidade || "").trim();
+  return { nome: `${ramo}${loc ? ` ${loc}` : ""} (verificar)`, fonte: "pessoa", suspeito: true, pessoa };
 }
 const RAMO_POR_NICHO: [RegExp, string][] = [
   [/saas|tecnolog|software|tech|app/, "Tecnologia"], [/energ|solar|fotovolt|renov/, "Energia Solar"],
@@ -452,8 +467,19 @@ const RAMO_POR_NICHO: [RegExp, string][] = [
 function razaoSocialSimulada(lead: ProspLead): string {
   const cidade = (lead.cidade || "").trim();
   const ramo = (RAMO_POR_NICHO.find(([re]) => re.test((lead.nicho || "").toLowerCase())) || [null, "Serviços"])[1];
-  const base = lead.socio1 ? lead.socio1.split(" ")[0] : (cidade || "Vale");
-  return `${base} ${ramo} LTDA`;
+  return cidade ? `${ramo} ${cidade}` : `${ramo} Vale do Paraíba`;
+}
+/** Aplica a resolução de nome no lead: empresa vira nome de EMPRESA e a pessoa
+ * que estava na empresa é movida pros sócios. Idempotente (roda no upload e no envio). */
+export function fixCompanyName(lead: ProspLead): ProspLead {
+  const r = resolveCompanyName(lead);
+  if (r.fonte === "lista") return lead;
+  let sociosExtra = lead.sociosExtra || [];
+  if (r.pessoa) {
+    const jaTem = [lead.socio1, lead.socio2, lead.decisorNome, ...sociosExtra.map((s) => s.nome)].filter(Boolean).map((x) => x.toLowerCase());
+    if (!jaTem.includes(r.pessoa.toLowerCase())) sociosExtra = [{ nome: r.pessoa, cargo: "Sócio(a)" }, ...sociosExtra];
+  }
+  return { ...lead, empresa: r.nome, sociosExtra, nomeFonte: r.fonte, nomeSuspeito: r.suspeito, decisorNome: lead.decisorNome || lead.socio1 || r.pessoa || "" };
 }
 
 // ---- enriquecimento (Lemit) — determinístico (protótipo). Produção: API por CNPJ. ----
