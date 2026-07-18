@@ -1,18 +1,18 @@
-import React, { useMemo, useRef, useState, useEffect } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import { DragDropContext, Droppable, Draggable, type DropResult } from "@hello-pangea/dnd";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, CartesianGrid,
 } from "recharts";
 import {
-  Upload, Download, Phone, MessageCircle, Star, Globe, Instagram, Facebook, Linkedin, Youtube,
+  Download, Phone, MessageCircle, Star, Globe, Instagram, Facebook, Linkedin, Youtube,
   MapPin, Search, Sparkles, X, Building2, Copy, Check, ClipboardList, Users, Trash2, Calendar, Clock,
-  LayoutGrid, Table2, BarChart3, Plus, UserCheck, Activity, AlertTriangle, TrendingUp, Beaker,
+  LayoutGrid, Table2, BarChart3, Plus, UserCheck, Activity, AlertTriangle, TrendingUp, Beaker, Rocket,
 } from "lucide-react";
 import { useAppStore } from "../../store";
 import {
-  parseFile, distribute, loadLeads, saveLeads, channelLink, telLink, callLink, whatsappLink,
+  loadLeads, saveLeads, markDismissed, channelLink, telLink, callLink, whatsappLink,
   generateApproach, toCSV, downloadCSV, canMoveTo, funnelMetrics, listQuality, maturityConversion, bdrProductivity,
-  STATUS_LABELS, STATUS_ORDER, STATUS_HINT, STATUS_COLOR, PIPELINE, NICHOS, NIVEIS, MOTIVOS_PERDA,
+  STATUS_LABELS, STATUS_ORDER, STATUS_HINT, STATUS_COLOR, NIVEIS, MOTIVOS_PERDA,
   ATIVIDADE_TIPOS, ATIVIDADE_RESULTADOS, tipoLabel, resultadoLabel, maturidadeMotivo, maturidadeBanda, nivelToNum,
   type ProspLead, type Status, type Nivel, type Touchpoint, type AtividadeTipo, type AtividadeResultado,
 } from "./hubOutbound/hubLib";
@@ -39,7 +39,7 @@ type Member = { id: string; name: string };
 type ViewMode = "kanban" | "tabela" | "gestao";
 interface HubProps { teamMembers?: Member[]; closers?: Member[]; }
 
-const FALLBACK_TEAM = ["BDR 1", "BDR 2", "BDR 3"].map((n) => ({ id: n, name: n }));
+const FALLBACK_TEAM = ["Lary", "Edric", "Bianca", "Erick"].map((n) => ({ id: n, name: n }));
 
 export const HubOutbound: React.FC<HubProps> = ({ teamMembers, closers = [] }) => {
   const team = (teamMembers && teamMembers.length ? teamMembers : FALLBACK_TEAM);
@@ -52,20 +52,26 @@ export const HubOutbound: React.FC<HubProps> = ({ teamMembers, closers = [] }) =
   const [search, setSearch] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
   const [banner, setBanner] = useState<{ ok: boolean; msg: string } | null>(null);
-  const [ownerSel, setOwnerSel] = useState<string>("__auto__");
-  const [nichoSel, setNichoSel] = useState<string>(NICHOS[0]);
   const [agendarFor, setAgendarFor] = useState<ProspLead | null>(null);
   const [perdaFor, setPerdaFor] = useState<ProspLead | null>(null);
-  const [pending, setPending] = useState<File[] | null>(null);
-  const [preview, setPreview] = useState<{ count: number; matched: number; missing: string[] } | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const fileRef = useRef<HTMLInputElement>(null);
 
   const persist = (next: ProspLead[]) => { setLeads(next); saveLeads(next); };
   const updateLead = (id: string, patch: Partial<ProspLead>) => {
     const next = leads.map((l) => (l.id === id ? { ...l, ...patch, updatedAt: new Date().toISOString() } : l));
     persist(next); return next.find((l) => l.id === id)!;
   };
+
+  // integração: o upload é feito só na aba Prospecção. Aqui a gente re-sincroniza
+  // (ingere leads novos) quando a aba ganha foco ou quando a Prospecção grava
+  // (evento 'storage', dispara entre abas). Ver loadLeads() em hubLib.
+  useEffect(() => {
+    const resync = () => setLeads(loadLeads());
+    const onStorage = (e: StorageEvent) => { if (!e.key || e.key === "v4_prospeccao_leads_v1") resync(); };
+    window.addEventListener("focus", resync);
+    window.addEventListener("storage", onStorage);
+    return () => { window.removeEventListener("focus", resync); window.removeEventListener("storage", onStorage); };
+  }, []);
 
   // auto-conserto: leads com dono fora do time atual → redistribuídos.
   useEffect(() => {
@@ -79,39 +85,6 @@ export const HubOutbound: React.FC<HubProps> = ({ teamMembers, closers = [] }) =
     setBanner({ ok: true, msg: `Corrigi ${orphans.length} lead(s) com dono antigo → redistribuídos entre ${teamNames.join(", ")}.` });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [teamNames.join(",")]);
-
-  const handleFiles = async (files: File[] | null, ownerName: string, nicho: string, origem: string) => {
-    if (!files?.length) return;
-    setOwnerSel(ownerName); setNichoSel(nicho);
-    const owner = ownerName === "__auto__" ? null : ownerName;
-    try {
-      let added = 0; let matched: string[] = []; let missing: string[] = [];
-      let acc = [...leads];
-      for (const f of files) {
-        const batch = f.name.replace(/\.(csv|xlsx?|xls)$/i, "");
-        const res = await parseFile(f, batch, nicho, owner, origem || batch);
-        matched = res.matched; missing = res.missing;
-        const existingIds = new Set(acc.map((l) => l.id));
-        const fresh = res.leads.filter((l) => !existingIds.has(l.id));
-        acc = owner ? [...acc, ...fresh] : distribute([...acc, ...fresh], teamNames);
-        added += fresh.length;
-      }
-      persist(acc);
-      setBanner({ ok: true, msg: `${added} lead(s) importado(s) · dono: ${owner || "distribuído"} · nicho: ${nicho} · colunas ${matched.length}/13${missing.length ? " · faltando: " + missing.join(", ") : ""}` });
-    } catch (e: any) {
-      setBanner({ ok: false, msg: "Falha ao ler o arquivo: " + (e?.message || e) });
-    }
-  };
-
-  const onFilePicked = async (files: FileList | null) => {
-    if (!files?.length) return;
-    const arr = Array.from(files);
-    setPending(arr);
-    if (fileRef.current) fileRef.current.value = "";
-    try { const r = await parseFile(arr[0], arr[0].name, nichoSel, null); setPreview({ count: r.leads.length, matched: r.matched.length, missing: r.missing }); }
-    catch { setPreview(null); }
-  };
-  const confirmImport = (owner: string, nicho: string, origem: string) => { handleFiles(pending, owner, nicho, origem); setPending(null); setPreview(null); };
 
   const bdrLeads = useMemo(() => leads.filter((l) => bdrFilter === "todos" || l.bdr === bdrFilter), [leads, bdrFilter]);
   const filtered = useMemo(() => {
@@ -130,14 +103,14 @@ export const HubOutbound: React.FC<HubProps> = ({ teamMembers, closers = [] }) =
   const toggleSel = (id: string) => setSelected((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const allVisibleSelected = filtered.length > 0 && filtered.every((l) => selected.has(l.id));
   const toggleAllVisible = () => setSelected((s) => { const n = new Set(s); if (allVisibleSelected) filtered.forEach((l) => n.delete(l.id)); else filtered.forEach((l) => n.add(l.id)); return n; });
-  const removeSelected = () => { if (!selected.size) return; if (confirm(`Remover ${selected.size} lead(s) selecionado(s)?`)) { persist(leads.filter((l) => !selected.has(l.id))); setSelected(new Set()); } };
+  const removeSelected = () => { if (!selected.size) return; if (confirm(`Remover ${selected.size} lead(s) do Hub? (não some da Prospecção)`)) { markDismissed(Array.from(selected)); persist(leads.filter((l) => !selected.has(l.id))); setSelected(new Set()); } };
 
   const exportCSV = () => {
     const rows = bdrFilter === "todos" ? leads : leads.filter((l) => l.bdr === bdrFilter);
     if (!rows.length) { setBanner({ ok: false, msg: "Nada pra exportar." }); return; }
     downloadCSV(`prospeccao_${bdrFilter}_${new Date().toISOString().slice(0, 10)}.csv`, toCSV(rows));
   };
-  const clearAll = () => { if (confirm("Apagar TODAS as listas deste navegador?")) persist([]); };
+  const clearAll = () => { if (confirm("Limpar o board do Hub? (os leads continuam na Prospecção; leads novos voltam a aparecer no próximo upload)")) { markDismissed(leads.map((l) => l.id)); persist([]); } };
 
   // ---------------- MOVIMENTAÇÃO com REGRAS DE NEGÓCIO ----------------
   const moveLead = (lead: ProspLead, to: Status) => {
@@ -198,15 +171,14 @@ export const HubOutbound: React.FC<HubProps> = ({ teamMembers, closers = [] }) =
           <ViewTab active={view === "tabela"} onClick={() => setView("tabela")} icon={Table2} label="Tabela" />
           <ViewTab active={view === "gestao"} onClick={() => setView("gestao")} icon={BarChart3} label="Gestão" />
         </div>
-        <input ref={fileRef} type="file" accept=".csv,.xls,.xlsx" multiple className="hidden" onChange={(e) => onFilePicked(e.target.files)} />
-        <button onClick={() => fileRef.current?.click()} className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-white text-sm font-semibold" style={{ background: RED }}>
-          <Upload size={15} /> Subir lista
-        </button>
+        <span className="hidden lg:inline-flex items-center gap-1.5 text-[11px] text-[var(--color-v4-text-muted)] px-2.5 py-2 rounded-lg border border-dashed border-[var(--color-v4-border)]">
+          <Rocket size={13} style={{ color: RED }} /> Listas vêm da aba <b className="text-white">Prospecção</b>
+        </span>
         <button onClick={exportCSV} className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-[var(--color-v4-border)] text-sm font-semibold text-white hover:bg-[var(--color-v4-card-hover)]">
           <Download size={15} /> Exportar
         </button>
         {leads.length > 0 && (
-          <button onClick={clearAll} title="Remover todos" className="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-lg border border-[var(--color-v4-border)] text-[var(--color-v4-text-muted)] hover:text-[var(--color-v4-red)] text-sm"><Trash2 size={15} /></button>
+          <button onClick={clearAll} title="Limpar board do Hub" className="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-lg border border-[var(--color-v4-border)] text-[var(--color-v4-text-muted)] hover:text-[var(--color-v4-red)] text-sm"><Trash2 size={15} /></button>
         )}
       </div>
 
@@ -218,7 +190,7 @@ export const HubOutbound: React.FC<HubProps> = ({ teamMembers, closers = [] }) =
         )}
 
         {leads.length === 0 ? (
-          <EmptyState onOpen={() => fileRef.current?.click()} onDemo={loadDemo} />
+          <EmptyState onDemo={loadDemo} />
         ) : (
           <>
             {/* filtros BDR + busca + métricas topo */}
@@ -260,8 +232,6 @@ export const HubOutbound: React.FC<HubProps> = ({ teamMembers, closers = [] }) =
         onUpdate={(patch) => updateLead(open.id, patch)} onMove={(s) => moveLead(open, s)} onAddAtividade={(tp) => addAtividade(open, tp)} />}
       {agendarFor && <AgendarModal lead={agendarFor} closers={closers} onClose={() => setAgendarFor(null)} onConfirm={confirmAgendar} />}
       {perdaFor && <PerdaModal lead={perdaFor} onClose={() => setPerdaFor(null)} onConfirm={confirmPerda} />}
-      {pending && <BdrModal team={teamNames} preview={preview} fileName={pending[0]?.name || ""} nFiles={pending.length} defOwner={ownerSel} defNicho={nichoSel}
-        onCancel={() => { setPending(null); setPreview(null); }} onConfirm={confirmImport} />}
     </div>
   );
 };
@@ -565,66 +535,17 @@ const Stars: React.FC<{ value: number; onChange?: (v: number) => void; readOnly?
   </div>
 );
 
-const EmptyState: React.FC<{ onOpen: () => void; onDemo: () => void }> = ({ onOpen, onDemo }) => (
+const EmptyState: React.FC<{ onDemo: () => void }> = ({ onDemo }) => (
   <div className="border-2 border-dashed border-[var(--color-v4-border)] rounded-2xl py-16 flex flex-col items-center justify-center text-center">
-    <div className="w-14 h-14 rounded-xl flex items-center justify-center mb-4" style={{ background: RED }}><Upload size={26} className="text-white" /></div>
+    <div className="w-14 h-14 rounded-xl flex items-center justify-center mb-4" style={{ background: RED }}><LayoutGrid size={26} className="text-white" /></div>
     <h2 className="text-lg font-bold text-white">Plataforma de Gestão de Outbound</h2>
-    <p className="text-sm text-[var(--color-v4-text-muted)] max-w-md mt-1">Suba a lista do Lemit (CSV/XLS) pra começar o pipeline, ou carregue uma base de exemplo pra explorar o Kanban de 9 etapas e os dashboards de gestão.</p>
-    <div className="flex gap-2 mt-4">
-      <button onClick={onOpen} className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-white text-sm font-semibold" style={{ background: RED }}><Upload size={15} /> Subir lista</button>
+    <p className="text-sm text-[var(--color-v4-text-muted)] max-w-md mt-1">Os leads chegam aqui automaticamente quando você <b className="text-white">sobe uma lista na aba Prospecção</b> — o upload é feito só lá pra não ter dois lugares com a mesma ação. Depois é só trabalhar o pipeline de 9 etapas aqui.</p>
+    <div className="flex flex-wrap items-center justify-center gap-2 mt-4">
+      <span className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border border-[var(--color-v4-border)] text-[var(--color-v4-text-muted)] text-sm"><Rocket size={15} style={{ color: RED }} /> Suba a lista na aba Prospecção</span>
       <button onClick={onDemo} className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-[var(--color-v4-border)] text-white text-sm font-semibold hover:bg-[var(--color-v4-card-hover)]"><Beaker size={15} /> Carregar dados de exemplo</button>
     </div>
   </div>
 );
-
-// ---------------- Modal pós-arquivo: BDR/dono + nicho + origem ----------------
-const BdrModal: React.FC<{ team: string[]; preview: { count: number; matched: number; missing: string[] } | null; fileName: string; nFiles: number; defOwner: string; defNicho: string; onCancel: () => void; onConfirm: (owner: string, nicho: string, origem: string) => void }> = ({ team, preview, fileName, nFiles, defOwner, defNicho, onCancel, onConfirm }) => {
-  const [owner, setOwner] = useState(defOwner);
-  const [nicho, setNicho] = useState(defNicho);
-  const [origem, setOrigem] = useState("Lemit");
-  return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/60" onClick={onCancel} />
-      <div className={`relative w-full max-w-md ${card} p-5`}>
-        <div className="flex items-center gap-2 mb-3">
-          <Users size={16} style={{ color: RED }} /><h3 className="text-sm font-bold text-white">Para qual BDR vai essa lista?</h3>
-          <div className="flex-1" /><button onClick={onCancel} className="text-[var(--color-v4-text-muted)] hover:text-white"><X size={18} /></button>
-        </div>
-        <div className="rounded-lg bg-[var(--color-v4-surface)] border border-[var(--color-v4-border)] px-3 py-2 mb-3 text-[11px] text-[var(--color-v4-text-muted)]">
-          📄 <b className="text-white">{fileName}</b>{nFiles > 1 ? ` +${nFiles - 1}` : ""}{preview ? ` · ${preview.count} lead(s) · colunas ${preview.matched}/13` : ""}
-          {preview && preview.missing.length > 0 && <div className="text-amber-400 mt-0.5">faltando: {preview.missing.join(", ")}</div>}
-        </div>
-        <div className="space-y-3">
-          <div>
-            <label className="text-[11px] text-[var(--color-v4-text-muted)] uppercase font-semibold">BDR / dono da lista *</label>
-            <select value={owner} onChange={(e) => setOwner(e.target.value)} autoFocus className="w-full mt-1 border border-[var(--color-v4-border)] bg-[var(--color-v4-surface)] text-white rounded-lg px-3 py-2 text-sm">
-              <option value="__auto__">Distribuir entre todos</option>
-              {team.map((n) => <option key={n} value={n}>{n}</option>)}
-            </select>
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="text-[11px] text-[var(--color-v4-text-muted)] uppercase font-semibold">Nicho</label>
-              <select value={nicho} onChange={(e) => setNicho(e.target.value)} className="w-full mt-1 border border-[var(--color-v4-border)] bg-[var(--color-v4-surface)] text-white rounded-lg px-3 py-2 text-sm">
-                {NICHOS.map((n) => <option key={n} value={n}>{n}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="text-[11px] text-[var(--color-v4-text-muted)] uppercase font-semibold">Origem da lista</label>
-              <input value={origem} onChange={(e) => setOrigem(e.target.value)} placeholder="Lemit, Apollo, evento…" className="w-full mt-1 border border-[var(--color-v4-border)] bg-[var(--color-v4-surface)] text-white rounded-lg px-3 py-2 text-sm" />
-            </div>
-          </div>
-        </div>
-        <div className="flex gap-2 mt-4">
-          <button onClick={onCancel} className="py-2 px-3 rounded-lg border border-[var(--color-v4-border)] text-[var(--color-v4-text-muted)] text-sm">Cancelar</button>
-          <button onClick={() => onConfirm(owner, nicho, origem)} className="flex-1 inline-flex items-center justify-center gap-2 py-2 rounded-lg text-white text-sm font-bold" style={{ background: RED }}>
-            <Upload size={14} /> Importar {preview ? `${preview.count} lead(s)` : ""}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-};
 
 // ---------------- Modal Agendar (regra: exige Decisor + Data) ----------------
 const AgendarModal: React.FC<{ lead: ProspLead; closers: Member[]; onClose: () => void; onConfirm: (o: { dataISO: string; closerId?: string; canal: string; closerNome?: string; decisorNome: string }) => void }> = ({ lead, closers, onClose, onConfirm }) => {

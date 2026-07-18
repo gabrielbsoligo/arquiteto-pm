@@ -280,34 +280,64 @@ export function whatsappLink(phone: string): string {
 }
 
 // ---------------- persistência (localStorage) ----------------
-const KEY = "v4_hub_outbound_leads_v1";
+const KEY = "v4_hub_outbound_leads_v1";              // estado de trabalho do Hub (etapas, decisor, atividades…)
+const PROSP_KEY = "v4_prospeccao_leads_v1";          // ÚNICO ponto de upload (aba Prospecção)
+const DISMISS_KEY = "v4_hub_outbound_dismissed_v1";  // ids removidos no Hub (p/ não voltarem no sync)
 const VALID_STATUS = new Set(STATUS_ORDER as string[]);
-// migração de status antigos (versões anteriores do Hub) → pipeline de 9 etapas
+// migração de status antigos (Prospecção 6 etapas / versões antigas) → pipeline de 9 etapas
 const STATUS_MIGRA: Record<string, Status> = {
   novo: "inteligencia", abordando: "prospeccao_ativa", conexao: "conectado", agendado: "reuniao_agendada",
   realizado: "reuniao_realizada", investigando: "prospeccao_ativa", abordado: "prospeccao_ativa",
   reuniao: "reuniao_agendada", descartado: "perdido",
 };
+
+// normaliza um lead (da Prospecção OU do próprio Hub) pro modelo rico de 9 etapas.
+function normalizeLead(l: any): ProspLead {
+  const maturidade = l.maturidade && l.maturidade > 0 ? l.maturidade : autoMaturidade(l);
+  return {
+    cnpj: "", origem: l.origem || l.batch || "Importada", decisorNome: l.decisorNome || l.socio1 || "",
+    decisorCargo: l.decisorCargo || (l.socio1 ? "Sócio(a)" : ""), decisorTel: l.decisorTel || l.whatsapp1 || "",
+    decisorEmail: l.decisorEmail || l.email || "", decisorLinkedin: l.decisorLinkedin || "",
+    atividades: Array.isArray(l.atividades) ? l.atividades : [],
+    createdAt: l.createdAt || new Date().toISOString(), updatedAt: l.updatedAt || l.createdAt || new Date().toISOString(),
+    ...l,
+    nicho: l.nicho || "Construtoras / Incorporadoras",
+    abordagem: l.abordagem || "", notas: l.notas || "",
+    status: VALID_STATUS.has(l.status) ? l.status : (STATUS_MIGRA[l.status as string] || "inteligencia"),
+    maturidade,
+    maturidadeNivel: l.maturidadeNivel || maturidadeBanda(maturidade),
+  } as ProspLead;
+}
+
+function readRaw(key: string): any[] {
+  try { const r = localStorage.getItem(key); return r ? JSON.parse(r) : []; } catch { return []; }
+}
+function loadDismissed(): Set<string> { try { return new Set(readRaw(DISMISS_KEY) as string[]); } catch { return new Set(); } }
+function saveDismissed(s: Set<string>) { try { localStorage.setItem(DISMISS_KEY, JSON.stringify(Array.from(s))); } catch { /* quota */ } }
+
+/** Marca ids como removidos no Hub — o sync com a Prospecção não os traz de volta. */
+export function markDismissed(ids: string[]): void {
+  const s = loadDismissed(); ids.forEach((id) => s.add(id)); saveDismissed(s);
+}
+
+/**
+ * Carrega os leads do Hub INTEGRANDO com a Prospecção: o upload acontece só na
+ * aba Prospecção; aqui a gente ingere os leads de lá que ainda não estão no Hub
+ * (respeitando os removidos). Os leads que já existem no Hub mantêm o estado de
+ * trabalho (etapa de 9, decisor, atividades, agendamento…).
+ */
 export function loadLeads(): ProspLead[] {
   try {
-    const raw = localStorage.getItem(KEY);
-    const arr = raw ? (JSON.parse(raw) as any[]) : [];
-    return arr.map((l) => {
-      const maturidade = l.maturidade && l.maturidade > 0 ? l.maturidade : autoMaturidade(l);
-      return {
-        cnpj: "", origem: l.origem || l.batch || "Importada", decisorNome: l.decisorNome || l.socio1 || "",
-        decisorCargo: l.decisorCargo || (l.socio1 ? "Sócio(a)" : ""), decisorTel: l.decisorTel || l.whatsapp1 || "",
-        decisorEmail: l.decisorEmail || l.email || "", decisorLinkedin: l.decisorLinkedin || "",
-        atividades: Array.isArray(l.atividades) ? l.atividades : [],
-        createdAt: l.createdAt || new Date().toISOString(), updatedAt: l.updatedAt || l.createdAt || new Date().toISOString(),
-        ...l,
-        nicho: l.nicho || "Construtoras / Incorporadoras",
-        abordagem: l.abordagem || "", notas: l.notas || "",
-        status: VALID_STATUS.has(l.status) ? l.status : (STATUS_MIGRA[l.status as string] || "inteligencia"),
-        maturidade,
-        maturidadeNivel: l.maturidadeNivel || maturidadeBanda(maturidade),
-      } as ProspLead;
-    });
+    const dismissed = loadDismissed();
+    const hubById = new Map<string, any>(readRaw(KEY).map((l) => [l.id, l]));
+    let changed = false;
+    for (const p of readRaw(PROSP_KEY)) {
+      if (!p || !p.id || dismissed.has(p.id)) continue;
+      if (!hubById.has(p.id)) { hubById.set(p.id, p); changed = true; } // novo lead vindo da Prospecção
+    }
+    const merged = Array.from(hubById.values()).map(normalizeLead);
+    if (changed) saveLeads(merged); // persiste os recém-ingeridos
+    return merged;
   } catch { return []; }
 }
 export function saveLeads(leads: ProspLead[]): void {
