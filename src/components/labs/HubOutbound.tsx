@@ -254,9 +254,6 @@ export const HubOutbound: React.FC<HubProps> = ({ teamMembers, closers = [] }) =
         <button onClick={exportCSV} className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-[var(--color-v4-border)] text-sm font-semibold text-white hover:bg-[var(--color-v4-card-hover)]">
           <Download size={15} /> Exportar
         </button>
-        {leads.length > 0 && (
-          <button onClick={clearAll} title="Remover todos os leads do Hub" className="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-lg border border-[var(--color-v4-border)] text-[var(--color-v4-text-muted)] hover:text-[var(--color-v4-red)] text-sm"><Trash2 size={15} /> Remover todos</button>
-        )}
       </div>
 
       <div className="p-6">
@@ -313,6 +310,10 @@ export const HubOutbound: React.FC<HubProps> = ({ teamMembers, closers = [] }) =
               </select>
               <span className="text-[11px] text-[var(--color-v4-text-muted)]">{common.length} lead(s){statusFilter ? ` · ${filtered.length} em ${STATUS_LABELS[statusFilter]}` : ""}</span>
               {filtrosAtivos && <button onClick={limparFiltros} className="text-[11px] underline text-[var(--color-v4-text-muted)] hover:text-white">limpar filtros</button>}
+              <div className="flex-1" />
+              {leads.length > 0 && (
+                <button onClick={clearAll} title="Remover todos os leads do Hub" className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--color-v4-border)] text-[var(--color-v4-text-muted)] hover:text-[var(--color-v4-red)] hover:border-[var(--color-v4-red)] px-2.5 py-1.5 text-xs"><Trash2 size={13} /> Remover todos</button>
+              )}
             </div>
 
             <MetricStrip m={metrics} />
