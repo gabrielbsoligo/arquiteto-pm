@@ -14,7 +14,7 @@ import {
   loadLeads, saveLeads, markDismissed, channelLink, telLink, callLink, whatsappLink, enrichLead, allPhones,
   generateApproach, toCSV, downloadCSV, canMoveTo, funnelMetrics, listQuality, maturityConversion, bdrProductivity,
   STATUS_LABELS, STATUS_ORDER, STATUS_HINT, STATUS_COLOR, NIVEIS, MOTIVOS_PERDA,
-  ATIVIDADE_TIPOS, ATIVIDADE_RESULTADOS, tipoLabel, resultadoLabel, maturidadeMotivo, maturidadeBanda, nivelToNum,
+  ATIVIDADE_TIPOS, ATIVIDADE_RESULTADOS, tipoLabel, resultadoLabel, maturidadeMotivo, maturidadeBanda, nivelToNum, autoMaturidade, NICHOS,
   type ProspLead, type Status, type Nivel, type Touchpoint, type AtividadeTipo, type AtividadeResultado,
 } from "./hubOutbound/hubLib";
 
@@ -31,6 +31,7 @@ const card = "rounded-xl border border-[var(--color-v4-border)] bg-[var(--color-
 const fmtDate = (iso?: string) => { if (!iso) return "—"; try { return new Date(iso).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit" }); } catch { return "—"; } };
 const fmtDateTime = (iso?: string) => { if (!iso) return "—"; try { return new Date(iso).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }); } catch { return "—"; } };
 const CANAIS = ["outbound", "inbound", "indicacao", "recomendacao"];
+const CANAIS_CRIACAO = ["Disparo", "Email", "Indicação", "Recomendação", "Evento", "PAP", "Lista Fria"];
 const CHECKLIST = [
   { icon: Globe, title: "SITE / LP", tips: "Proposta de valor · Stack tecnológico · Maturidade de conversão (CTAs) · Prova social" },
   { icon: Linkedin, title: "LINKEDIN", tips: "Decisores (C-Level) · Momento (vagas abertas) · Tamanho da operação · Notícias/marcos" },
@@ -57,6 +58,7 @@ export const HubOutbound: React.FC<HubProps> = ({ teamMembers, closers = [] }) =
   const [banner, setBanner] = useState<{ ok: boolean; msg: string } | null>(null);
   const [agendarFor, setAgendarFor] = useState<ProspLead | null>(null);
   const [perdaFor, setPerdaFor] = useState<ProspLead | null>(null);
+  const [novoOpen, setNovoOpen] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   // filtros: nicho, maturidade, período (criado/atualizado)
   const [nichoFilter, setNichoFilter] = useState<string>("todos");
@@ -144,6 +146,27 @@ export const HubOutbound: React.FC<HubProps> = ({ teamMembers, closers = [] }) =
   const allVisibleSelected = filtered.length > 0 && filtered.every((l) => selected.has(l.id));
   const toggleAllVisible = () => setSelected((s) => { const n = new Set(s); if (allVisibleSelected) filtered.forEach((l) => n.delete(l.id)); else filtered.forEach((l) => n.add(l.id)); return n; });
   const removeSelected = () => { if (!selected.size) return; if (confirm(`Remover ${selected.size} lead(s) do Hub? (não some da Prospecção)`)) { markDismissed(Array.from(selected)); persist(leads.filter((l) => !selected.has(l.id))); setSelected(new Set()); } };
+  // remover 1 lead direto do card do Kanban
+  const removeLead = (lead: ProspLead) => { if (confirm(`Remover "${lead.empresa || "lead"}" do Hub?`)) { markDismissed([lead.id]); persist(leads.filter((l) => l.id !== lead.id)); } };
+  // criar lead manualmente no Hub (com canal de origem)
+  const createLead = (data: { empresa: string; decisorNome: string; decisorCargo: string; decisorTel: string; decisorEmail: string; cidade: string; estado: string; nicho: string; canal: string; bdr: string; site: string }) => {
+    const now = new Date().toISOString();
+    const novo: ProspLead = {
+      id: `manual-${Date.now()}-${Math.round(Math.random() * 1e6)}`,
+      empresa: data.empresa, cnpj: "", socio1: data.decisorNome, socio2: "",
+      whatsapp1: data.decisorTel, whatsapp2: "", email: data.decisorEmail, site: data.site,
+      cidade: data.cidade, estado: data.estado, instagram: "", facebook: "", linkedin: "", youtube: "",
+      nicho: data.nicho, origem: data.canal,
+      decisorNome: data.decisorNome, decisorCargo: data.decisorCargo, decisorTel: data.decisorTel, decisorEmail: data.decisorEmail, decisorLinkedin: "",
+      bdr: data.bdr || teamNames[0] || null, maturidade: 0, maturidadeNivel: "Baixa", abordagem: "",
+      status: "inteligencia", canal: data.canal, atividades: [], notas: "", batch: "manual", createdAt: now, updatedAt: now,
+      enviadoHub: true,
+    } as ProspLead;
+    novo.maturidade = autoMaturidade(novo); novo.maturidadeNivel = maturidadeBanda(novo.maturidade);
+    persist([novo, ...leads]);
+    setNovoOpen(false);
+    setBanner({ ok: true, msg: `Lead "${novo.empresa}" criado · canal ${data.canal} · dono ${novo.bdr} — na etapa Inteligência.` });
+  };
 
   const exportCSV = () => {
     const rows = bdrFilter === "todos" ? leads : leads.filter((l) => l.bdr === bdrFilter);
@@ -225,14 +248,14 @@ export const HubOutbound: React.FC<HubProps> = ({ teamMembers, closers = [] }) =
           <ViewTab active={view === "tabela"} onClick={() => setView("tabela")} icon={Table2} label="Tabela" />
           <ViewTab active={view === "gestao"} onClick={() => setView("gestao")} icon={BarChart3} label="Gestão" />
         </div>
-        <span className="hidden lg:inline-flex items-center gap-1.5 text-[11px] text-[var(--color-v4-text-muted)] px-2.5 py-2 rounded-lg border border-dashed border-[var(--color-v4-border)]">
-          <Rocket size={13} style={{ color: RED }} /> Listas vêm da aba <b className="text-white">Prospecção</b>
-        </span>
+        <button onClick={() => setNovoOpen(true)} className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-white text-sm font-semibold" style={{ background: RED }}>
+          <Plus size={15} /> Novo lead
+        </button>
         <button onClick={exportCSV} className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-[var(--color-v4-border)] text-sm font-semibold text-white hover:bg-[var(--color-v4-card-hover)]">
           <Download size={15} /> Exportar
         </button>
         {leads.length > 0 && (
-          <button onClick={clearAll} title="Limpar board do Hub" className="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-lg border border-[var(--color-v4-border)] text-[var(--color-v4-text-muted)] hover:text-[var(--color-v4-red)] text-sm"><Trash2 size={15} /></button>
+          <button onClick={clearAll} title="Remover todos os leads do Hub" className="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-lg border border-[var(--color-v4-border)] text-[var(--color-v4-text-muted)] hover:text-[var(--color-v4-red)] text-sm"><Trash2 size={15} /> Remover todos</button>
         )}
       </div>
 
@@ -295,7 +318,7 @@ export const HubOutbound: React.FC<HubProps> = ({ teamMembers, closers = [] }) =
             <MetricStrip m={metrics} />
 
             {view === "kanban" && (
-              <KanbanBoard leads={statusFilter ? filtered : common} onlyStatus={statusFilter} onDragEnd={onDragEnd} onOpen={(id) => setOpenId(id)} />
+              <KanbanBoard leads={statusFilter ? filtered : common} onlyStatus={statusFilter} onDragEnd={onDragEnd} onOpen={(id) => setOpenId(id)} onRemove={removeLead} />
             )}
 
             {view === "tabela" && (
@@ -318,9 +341,64 @@ export const HubOutbound: React.FC<HubProps> = ({ teamMembers, closers = [] }) =
         onUpdate={(patch) => updateLead(open.id, patch)} onMove={(s) => moveLead(open, s)} onAddAtividade={(tp) => addAtividade(open, tp)} onEnrich={() => enrich(open)} />}
       {agendarFor && <AgendarModal lead={agendarFor} closers={closers} onClose={() => setAgendarFor(null)} onConfirm={confirmAgendar} />}
       {perdaFor && <PerdaModal lead={perdaFor} onClose={() => setPerdaFor(null)} onConfirm={confirmPerda} />}
+      {novoOpen && <NovoLeadModal team={teamNames} onClose={() => setNovoOpen(false)} onConfirm={createLead} />}
     </div>
   );
 };
+
+// ================= Modal Novo Lead =================
+const NovoLeadModal: React.FC<{ team: string[]; onClose: () => void; onConfirm: (d: { empresa: string; decisorNome: string; decisorCargo: string; decisorTel: string; decisorEmail: string; cidade: string; estado: string; nicho: string; canal: string; bdr: string; site: string }) => void }> = ({ team, onClose, onConfirm }) => {
+  const [f, setF] = useState({ empresa: "", decisorNome: "", decisorCargo: "", decisorTel: "", decisorEmail: "", cidade: "", estado: "", nicho: NICHOS[0], canal: CANAIS_CRIACAO[0], bdr: team[0] || "", site: "" });
+  const set = (k: string, v: string) => setF((s) => ({ ...s, [k]: v }));
+  const ok = f.empresa.trim().length > 0;
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
+      <div className={`relative w-full max-w-lg ${card} p-5 max-h-[90vh] overflow-y-auto`}>
+        <div className="flex items-center gap-2 mb-3"><Plus size={16} style={{ color: RED }} /><h3 className="text-sm font-bold text-white">Novo lead</h3><div className="flex-1" /><button onClick={onClose} className="text-[var(--color-v4-text-muted)] hover:text-white"><X size={18} /></button></div>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="col-span-2"><NLField label="Empresa *" value={f.empresa} onChange={(v) => set("empresa", v)} placeholder="Nome da empresa" /></div>
+          <NLField label="Decisor" value={f.decisorNome} onChange={(v) => set("decisorNome", v)} />
+          <NLField label="Cargo" value={f.decisorCargo} onChange={(v) => set("decisorCargo", v)} placeholder="CEO, Sócio…" />
+          <NLField label="Telefone / WhatsApp" value={f.decisorTel} onChange={(v) => set("decisorTel", v)} />
+          <NLField label="E-mail" value={f.decisorEmail} onChange={(v) => set("decisorEmail", v)} />
+          <NLField label="Cidade" value={f.cidade} onChange={(v) => set("cidade", v)} />
+          <NLField label="UF" value={f.estado} onChange={(v) => set("estado", v)} />
+          <div className="col-span-2"><NLField label="Site" value={f.site} onChange={(v) => set("site", v)} placeholder="empresa.com.br" /></div>
+          <div>
+            <label className="text-[11px] text-[var(--color-v4-text-muted)] uppercase font-semibold">Canal *</label>
+            <select value={f.canal} onChange={(e) => set("canal", e.target.value)} className="w-full mt-1 border border-[var(--color-v4-border)] bg-[var(--color-v4-surface)] text-white rounded-lg px-3 py-2 text-sm">
+              {CANAIS_CRIACAO.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-[11px] text-[var(--color-v4-text-muted)] uppercase font-semibold">Nicho</label>
+            <select value={f.nicho} onChange={(e) => set("nicho", e.target.value)} className="w-full mt-1 border border-[var(--color-v4-border)] bg-[var(--color-v4-surface)] text-white rounded-lg px-3 py-2 text-sm">
+              {NICHOS.map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </div>
+          <div className="col-span-2">
+            <label className="text-[11px] text-[var(--color-v4-text-muted)] uppercase font-semibold">Dono (BDR)</label>
+            <select value={f.bdr} onChange={(e) => set("bdr", e.target.value)} className="w-full mt-1 border border-[var(--color-v4-border)] bg-[var(--color-v4-surface)] text-white rounded-lg px-3 py-2 text-sm">
+              {team.map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </div>
+        </div>
+        <div className="flex gap-2 mt-4">
+          <button onClick={onClose} className="py-2 px-3 rounded-lg border border-[var(--color-v4-border)] text-[var(--color-v4-text-muted)] text-sm">Cancelar</button>
+          <button disabled={!ok} onClick={() => onConfirm(f)} className="flex-1 inline-flex items-center justify-center gap-2 py-2 rounded-lg text-white text-sm font-bold disabled:opacity-30" style={{ background: RED }}><Plus size={14} /> Criar lead</button>
+        </div>
+        <p className="text-[10px] text-[var(--color-v4-text-muted)] mt-2">Entra na etapa <b>Inteligência</b> do Kanban. O canal vira a origem do lead (aparece na Gestão → Qualidade da Lista).</p>
+      </div>
+    </div>
+  );
+};
+const NLField: React.FC<{ label: string; value: string; onChange: (v: string) => void; placeholder?: string }> = ({ label, value, onChange, placeholder }) => (
+  <div>
+    <label className="text-[11px] text-[var(--color-v4-text-muted)] uppercase font-semibold">{label}</label>
+    <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className="w-full mt-1 border border-[var(--color-v4-border)] bg-[var(--color-v4-surface)] text-white rounded-lg px-3 py-2 text-sm" />
+  </div>
+);
 
 // ================= MÉTRICAS (topo) =================
 const MetricStrip: React.FC<{ m: ReturnType<typeof funnelMetrics> }> = ({ m }) => (
@@ -340,7 +418,7 @@ const Kpi: React.FC<{ label: string; value: React.ReactNode; hint?: string; acce
 );
 
 // ================= KANBAN =================
-const KanbanBoard: React.FC<{ leads: ProspLead[]; onlyStatus?: Status | null; onDragEnd: (r: DropResult) => void; onOpen: (id: string) => void }> = ({ leads, onlyStatus, onDragEnd, onOpen }) => {
+const KanbanBoard: React.FC<{ leads: ProspLead[]; onlyStatus?: Status | null; onDragEnd: (r: DropResult) => void; onOpen: (id: string) => void; onRemove: (l: ProspLead) => void }> = ({ leads, onlyStatus, onDragEnd, onOpen, onRemove }) => {
   const byStatus = (s: Status) => leads.filter((l) => l.status === s);
   const cols = onlyStatus ? [onlyStatus] : STATUS_ORDER;
   return (
@@ -376,7 +454,8 @@ const KanbanBoard: React.FC<{ leads: ProspLead[]; onlyStatus?: Status | null; on
                             className={`mb-2 rounded-lg border bg-[var(--color-v4-surface)] p-2.5 cursor-pointer select-none ${dsnap.isDragging ? "border-[var(--color-v4-red)] shadow-lg" : "border-[var(--color-v4-border)] hover:border-[var(--color-v4-red)]"}`}>
                             <div className="flex items-start gap-1.5">
                               <Building2 size={13} className="text-[var(--color-v4-text-muted)] mt-0.5 shrink-0" />
-                              <span className="text-[12.5px] font-semibold text-white leading-tight">{l.empresa || "—"}</span>
+                              <span className="text-[12.5px] font-semibold text-white leading-tight flex-1">{l.empresa || "—"}</span>
+                              <button onClick={(e) => { e.stopPropagation(); onRemove(l); }} title="Remover lead" className="shrink-0 -mt-0.5 -mr-0.5 p-0.5 rounded text-[var(--color-v4-text-muted)] hover:text-white hover:bg-red-500/20"><X size={13} /></button>
                             </div>
                             <div className="text-[10.5px] text-[var(--color-v4-text-muted)] mt-1 flex items-center gap-1"><MapPin size={10} />{[l.cidade, l.estado].filter(Boolean).join("/") || "—"}</div>
                             {l.decisorNome && <div className="text-[10.5px] text-[var(--color-v4-text-muted)] flex items-center gap-1 mt-0.5"><UserCheck size={10} />{l.decisorNome}{l.decisorCargo ? ` · ${l.decisorCargo}` : ""}</div>}
