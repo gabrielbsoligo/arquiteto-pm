@@ -491,6 +491,29 @@ export function saveLeads(leads: ProspLead[]): void {
   try { localStorage.setItem(KEY, JSON.stringify(leads)); } catch { /* quota */ }
 }
 
+/**
+ * Entrega direta: grava os leads (vindos da Prospecção) NO storage do Hub agora,
+ * sem depender do sync/ingestão. Usado pelo botão "Enviar ao Hub" — garante que
+ * aparecem imediatamente. Mantém o estado de trabalho de leads que já existem no
+ * Hub (não sobrescreve etapa/atividades) e tira os ids do "descartados".
+ * Retorna quantos leads novos foram adicionados.
+ */
+export function pushToHub(prospLeads: any[]): number {
+  try {
+    const hubById = new Map<string, any>(readRaw(KEY).map((l) => [l.id, l]));
+    const dismissed = loadDismissed();
+    let added = 0;
+    for (const p of prospLeads) {
+      if (!p || !p.id) continue;
+      dismissed.delete(p.id);                 // reenvio explícito sempre entrega
+      if (!hubById.has(p.id)) { hubById.set(p.id, p); added++; } // novo → entra; existente → mantém trabalho do Hub
+    }
+    saveDismissed(dismissed);
+    saveLeads(Array.from(hubById.values()).map(normalizeLead));
+    return added;
+  } catch { return 0; }
+}
+
 // ---------------- distribuição entre BDRs ----------------
 export function distribute(leads: ProspLead[], bdrs: string[]): ProspLead[] {
   if (!bdrs.length) return leads;
