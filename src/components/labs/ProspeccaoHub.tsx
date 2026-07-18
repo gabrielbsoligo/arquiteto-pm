@@ -29,18 +29,18 @@ type Member = { id: string; name: string };
 interface HubProps {
   teamMembers?: Member[];
   closers?: Member[];
-  onSyncStatus?: (lead: ProspLead, status: ProspLead["status"]) => Promise<void> | void;
-  onAgendar?: (lead: ProspLead, opts: { dataISO: string; closerId?: string; canal: string }) => Promise<void> | void;
 }
 
 const FALLBACK_TEAM = ["Lary", "Edric", "Bianca", "Erick"].map((n) => ({ id: n, name: n }));
+const FUNIL: ProspLead["status"][] = ["abordando", "conexao", "agendado", "realizado", "fechado"];
 
-export const ProspeccaoHub: React.FC<HubProps> = ({ teamMembers, closers = [], onSyncStatus, onAgendar }) => {
+export const ProspeccaoHub: React.FC<HubProps> = ({ teamMembers, closers = [] }) => {
   const team = (teamMembers && teamMembers.length ? teamMembers : FALLBACK_TEAM);
   const teamNames = team.map((t) => t.name);
 
   const [leads, setLeads] = useState<ProspLead[]>(() => loadLeads());
   const [bdrFilter, setBdrFilter] = useState<string>("todos");
+  const [statusFilter, setStatusFilter] = useState<ProspLead["status"] | null>(null);
   const [search, setSearch] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
   const [banner, setBanner] = useState<{ ok: boolean; msg: string } | null>(null);
@@ -75,13 +75,24 @@ export const ProspeccaoHub: React.FC<HubProps> = ({ teamMembers, closers = [], o
     if (fileRef.current) fileRef.current.value = "";
   };
 
+  const bdrLeads = useMemo(() => leads.filter((l) => bdrFilter === "todos" || l.bdr === bdrFilter), [leads, bdrFilter]);
   const filtered = useMemo(() => {
     const s = search.trim().toLowerCase();
-    return leads.filter((l) =>
-      (bdrFilter === "todos" || l.bdr === bdrFilter) &&
+    return bdrLeads.filter((l) =>
+      (!statusFilter || l.status === statusFilter) &&
       (!s || l.empresa.toLowerCase().includes(s) || l.cidade.toLowerCase().includes(s) || l.socio1.toLowerCase().includes(s)))
       .sort((a, b) => b.maturidade - a.maturidade);
-  }, [leads, bdrFilter, search]);
+  }, [bdrLeads, statusFilter, search]);
+
+  // FUNIL local (simulação): conta por status; conversão etapa→etapa
+  const funil = useMemo(() => FUNIL.map((s, i, arr) => {
+    const n = bdrLeads.filter((l) => l.status === s).length;
+    const prev = i > 0 ? bdrLeads.filter((l) => l.status === arr[i - 1]).length : 0;
+    return { s, n, conv: i > 0 && prev > 0 ? Math.round((100 * n) / prev) : null };
+  }), [bdrLeads]);
+  const naoAbordados = useMemo(() => bdrLeads.filter((l) => l.status === "novo").length, [bdrLeads]);
+  // AGENDA local (simulação): reuniões marcadas
+  const agenda = useMemo(() => bdrLeads.filter((l) => l.status === "agendado" && l.dataReuniao).sort((a, b) => (a.dataReuniao || "").localeCompare(b.dataReuniao || "")), [bdrLeads]);
 
   const countByBdr = (b: string) => leads.filter((l) => l.bdr === b).length;
   const open = openId ? leads.find((l) => l.id === openId) || null : null;
@@ -93,21 +104,18 @@ export const ProspeccaoHub: React.FC<HubProps> = ({ teamMembers, closers = [], o
   };
   const clearAll = () => { if (confirm("Apagar TODAS as listas deste navegador?")) persist([]); };
 
-  const changeStatus = async (lead: ProspLead, status: ProspLead["status"]) => {
+  // simulação local: só atualiza o Hub (localStorage). O funil e a agenda abaixo refletem na hora.
+  const changeStatus = (lead: ProspLead, status: ProspLead["status"]) => {
     if (status === "agendado") { setAgendarFor(lead); return; }
-    const updated = updateLead(lead.id, { status });
-    try { await onSyncStatus?.(updated, status); }
-    catch { setBanner({ ok: false, msg: "Status salvo aqui. Subir o lead pra tela Leads / somar no funil só funciona em produção (Labs read-only)." }); }
+    updateLead(lead.id, { status });
   };
 
-  const confirmAgendar = async (opts: { dataISO: string; closerId?: string; canal: string }) => {
+  const confirmAgendar = (opts: { dataISO: string; closerId?: string; canal: string; closerNome?: string }) => {
     if (!agendarFor) return;
-    const closerNome = closers.find((c) => c.id === opts.closerId)?.name || "";
-    const updated = updateLead(agendarFor.id, { status: "agendado", dataReuniao: opts.dataISO, closerId: opts.closerId, closerNome, canal: opts.canal });
-    const lead = agendarFor; setAgendarFor(null);
-    try { await onAgendar?.(updated, opts); setBanner({ ok: true, msg: `Agendado com ${closerNome || "closer"} — reunião criada.` }); }
-    catch { setBanner({ ok: false, msg: `Agendamento salvo aqui. Criar a reunião e cair na agenda do closer (${closerNome}) só funciona em produção (Labs read-only).` }); }
-    void lead;
+    const closerNome = closers.find((c) => c.id === opts.closerId)?.name || opts.closerNome || "";
+    updateLead(agendarFor.id, { status: "agendado", dataReuniao: opts.dataISO, closerId: opts.closerId, closerNome, canal: opts.canal });
+    setAgendarFor(null);
+    setBanner({ ok: true, msg: `Agendado com ${closerNome || "closer"} para ${new Date(opts.dataISO).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })} — veja na Agenda (simulação local).` });
   };
 
   return (
@@ -167,6 +175,23 @@ export const ProspeccaoHub: React.FC<HubProps> = ({ teamMembers, closers = [], o
               </div>
             </div>
 
+            {/* FUNIL LOCAL (simulação) — reflete os status na hora */}
+            <div className={`${card} p-3 mb-4`}>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[11px] font-semibold text-white uppercase tracking-wide">Funil (simulação local)</span>
+                <span className="text-[10px] text-[var(--color-v4-text-muted)]">clique numa etapa pra filtrar · A abordar: {naoAbordados}{statusFilter ? " · " : ""}{statusFilter && <button onClick={() => setStatusFilter(null)} className="underline">limpar filtro</button>}</span>
+              </div>
+              <div className="flex flex-wrap items-stretch gap-2">
+                {funil.map(({ s, n, conv }) => (
+                  <button key={s} onClick={() => setStatusFilter(statusFilter === s ? null : s)}
+                    className={`flex-1 min-w-[110px] rounded-lg border px-3 py-2 text-left transition-colors ${statusFilter === s ? "border-[var(--color-v4-red)]" : "border-[var(--color-v4-border)]"} bg-[var(--color-v4-surface)] hover:border-[var(--color-v4-red)]`}>
+                    <div className="text-[10px] text-[var(--color-v4-text-muted)] flex items-center justify-between">{STATUS_LABELS[s]}{conv != null && <span style={{ color: RED }}>▲{conv}%</span>}</div>
+                    <div className="text-2xl font-bold text-white">{n}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <div className={`overflow-x-auto ${card}`}>
               <table className="w-full text-sm min-w-[880px]">
                 <thead className="bg-[var(--color-v4-surface)] text-[var(--color-v4-text-muted)] text-left text-[11px] uppercase tracking-wide">
@@ -194,6 +219,29 @@ export const ProspeccaoHub: React.FC<HubProps> = ({ teamMembers, closers = [], o
               </table>
             </div>
             <p className="text-[11px] text-[var(--color-v4-text-muted)] mt-2">{filtered.length} lead(s) · ordenados por presença digital (prioridade ↓) · salvos neste navegador</p>
+
+            {/* AGENDA LOCAL (simulação) */}
+            {agenda.length > 0 && (
+              <div className={`${card} mt-4`}>
+                <div className="px-4 py-3 border-b border-[var(--color-v4-border)] flex items-center gap-2">
+                  <Calendar size={15} style={{ color: RED }} />
+                  <span className="text-sm font-bold text-white">Agenda (simulação local)</span>
+                  <span className="text-[11px] text-[var(--color-v4-text-muted)]">{agenda.length} reunião(ões) agendada(s)</span>
+                </div>
+                <div className="divide-y divide-[var(--color-v4-border)]">
+                  {agenda.map((l) => (
+                    <div key={l.id} className="px-4 py-2.5 flex flex-wrap items-center gap-3 text-sm hover:bg-[var(--color-v4-card-hover)] cursor-pointer" onClick={() => setOpenId(l.id)}>
+                      <span className="font-semibold w-32" style={{ color: RED }}>{new Date(l.dataReuniao!).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>
+                      <span className="text-white flex-1 min-w-[120px] font-medium">{l.empresa}</span>
+                      <span className="text-[var(--color-v4-text-muted)] text-xs">closer {l.closerNome || "—"}</span>
+                      <span className="text-[11px] px-2 py-0.5 rounded bg-[var(--color-v4-surface)]">{l.canal}</span>
+                      <span className="text-[var(--color-v4-text-muted)] text-xs">dono {l.bdr}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="px-4 py-2 text-[10px] text-[var(--color-v4-text-muted)] opacity-70">Simulação local — em produção estas reuniões cairiam na agenda (Google Calendar) do closer.</div>
+              </div>
+            )}
           </>
         )}
       </div>
@@ -241,7 +289,7 @@ const EmptyState: React.FC<{ onPick: () => void; onFiles: (f: FileList | null) =
 );
 
 // ---------------- Modal Agendar ----------------
-const AgendarModal: React.FC<{ lead: ProspLead; closers: Member[]; onClose: () => void; onConfirm: (o: { dataISO: string; closerId?: string; canal: string }) => void }> = ({ lead, closers, onClose, onConfirm }) => {
+const AgendarModal: React.FC<{ lead: ProspLead; closers: Member[]; onClose: () => void; onConfirm: (o: { dataISO: string; closerId?: string; canal: string; closerNome?: string }) => void }> = ({ lead, closers, onClose, onConfirm }) => {
   const now = new Date(Date.now() + 864e5); const p = (n: number) => String(n).padStart(2, "0");
   const [data, setData] = useState(`${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())}T10:00`);
   const [closerId, setCloserId] = useState(closers[0]?.id || "");
@@ -278,7 +326,7 @@ const AgendarModal: React.FC<{ lead: ProspLead; closers: Member[]; onClose: () =
         </div>
         <div className="flex gap-2 mt-4">
           <button onClick={onClose} className="py-2 px-3 rounded-lg border border-[var(--color-v4-border)] text-[var(--color-v4-text-muted)] text-sm">Cancelar</button>
-          <button disabled={!ok} onClick={() => onConfirm({ dataISO: new Date(data).toISOString(), closerId: closerId || undefined, canal })}
+          <button disabled={!ok} onClick={() => onConfirm({ dataISO: new Date(data).toISOString(), closerId: closerId || undefined, canal, closerNome: closerNome || undefined })}
             className="flex-1 inline-flex items-center justify-center gap-2 py-2 rounded-lg text-white text-sm font-bold disabled:opacity-30" style={{ background: RED }}>
             <Clock size={14} /> Agendar
           </button>
@@ -422,7 +470,8 @@ const Field: React.FC<{ label: string; value?: string }> = ({ label, value }) =>
   <div><p className="text-[10px] font-semibold text-[var(--color-v4-text-muted)] uppercase">{label}</p><p className="text-white">{value || "—"}</p></div>
 );
 
-// ---------------- Route (usa o store pra time real de SDRs/closers + escrita em produção) ----------------
+// ---------------- Route: usa o store só pra puxar os NOMES reais (SDRs/closers). ----------------
+// Simulação local — NÃO grava no banco/agenda de produção (o clone é read-only).
 export const LabProspeccaoRoute: React.FC = () => {
   const store = useAppStore();
   const teamMembers = useMemo(() => {
@@ -430,21 +479,7 @@ export const LabProspeccaoRoute: React.FC = () => {
     return t.length ? t : FALLBACK_TEAM;
   }, [store.members]);
   const closers = useMemo(() => store.members.filter((m) => m.active && (m.role === "closer" || m.role === "gestor")).map((m) => ({ id: m.id, name: m.name })), [store.members]);
-
-  const idOf = (name?: string | null) => teamMembers.find((t) => t.name === name)?.id;
-
-  const onSyncStatus = async (lead: ProspLead, status: ProspLead["status"]) => {
-    const etapa = ({ abordando: "em_follow", conexao: "em_follow", agendado: "reuniao_marcada", realizado: "reuniao_marcada", fechado: "reuniao_realizada" } as Record<string, string>)[status];
-    if (!etapa) return;
-    await store.addLead({ empresa: lead.empresa, canal: "outbound" as any, status: etapa as any, sdr_id: idOf(lead.bdr), telefone: lead.whatsapp1, email: lead.email, nome_contato: lead.socio1 } as any);
-  };
-  const onAgendar = async (lead: ProspLead, opts: { dataISO: string; closerId?: string; canal: string }) => {
-    const sdrId = idOf(lead.bdr);
-    const novo = await store.addLead({ empresa: lead.empresa, canal: (opts.canal || "outbound") as any, status: "reuniao_marcada" as any, sdr_id: sdrId, telefone: lead.whatsapp1, email: lead.email, nome_contato: lead.socio1 } as any);
-    await store.addReuniao({ lead_id: novo?.id, sdr_id: sdrId, closer_id: opts.closerId, data_reuniao: opts.dataISO, canal: opts.canal, empresa: lead.empresa, tipo: "primeira_call" } as any);
-  };
-
-  return <ProspeccaoHub teamMembers={teamMembers} closers={closers} onSyncStatus={onSyncStatus} onAgendar={onAgendar} />;
+  return <ProspeccaoHub teamMembers={teamMembers} closers={closers} />;
 };
 
 export default ProspeccaoHub;
