@@ -504,8 +504,8 @@ const BdrModal: React.FC<{ team: string[]; preview: { count: number; matched: nu
         <div className="space-y-3">
           <div>
             <div className="flex items-center justify-between">
-              <label className="text-[11px] text-[var(--color-v4-text-muted)] uppercase font-semibold">Dono(s) da lista — marque um ou mais</label>
-              <button onClick={() => setOwners(owners.length === team.length ? [] : [...team])} className="text-[10.5px] underline text-[var(--color-v4-text-muted)] hover:text-white">{owners.length === team.length ? "limpar" : "todos"}</button>
+              <label className="text-[11px] text-[var(--color-v4-text-muted)] uppercase font-semibold">Dono(s) — pode marcar VÁRIOS {owners.length > 0 && <span className="text-white">· {owners.length} selecionado(s)</span>}</label>
+              <button onClick={() => setOwners([...team])} className="text-[10.5px] underline hover:text-white" style={{ color: RED }}>Dividir entre a equipe (todos)</button>
             </div>
             <div className="grid grid-cols-2 gap-1.5 mt-1.5">
               {team.map((n) => {
@@ -518,12 +518,15 @@ const BdrModal: React.FC<{ team: string[]; preview: { count: number; matched: nu
                 );
               })}
             </div>
+            {owners.length > 0 && (
+              <button onClick={() => setOwners([])} className="text-[10.5px] underline text-[var(--color-v4-text-muted)] hover:text-white mt-1">limpar seleção</button>
+            )}
             <p className="text-[11px] mt-1.5" style={{ color: RED }}>
               {owners.length === 0
                 ? `Nenhum marcado → divide entre todos (${team.length}) · ~${base}${resto ? `–${base + 1}` : ""} cada`
                 : owners.length === 1
                   ? `Tudo para ${owners[0]} (${total} lead(s))`
-                  : `Divide ${total} entre ${owners.length} → ~${base}${resto ? `–${base + 1}` : ""} cada (${owners.join(", ")})`}
+                  : `Divide ${total} igualmente entre ${owners.length} → ~${base}${resto ? `–${base + 1}` : ""} cada (${owners.join(", ")})`}
             </p>
           </div>
           <div>
