@@ -5,7 +5,7 @@ import {
 } from "lucide-react";
 import { useAppStore } from "../../store";
 import {
-  parseFile, distribute, loadLeads, saveLeads, channelLink, telLink, callLink, whatsappLink,
+  parseFile, loadLeads, saveLeads, channelLink, telLink, callLink, whatsappLink,
   generateApproach, toCSV, downloadCSV, STATUS_LABELS, STATUS_ORDER, NICHOS, maturidadeMotivo, type ProspLead,
 } from "./prospeccao/prospLib";
 
@@ -44,7 +44,7 @@ export const ProspeccaoHub: React.FC<HubProps> = ({ teamMembers, closers = [] })
   const [search, setSearch] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
   const [banner, setBanner] = useState<{ ok: boolean; msg: string } | null>(null);
-  const [ownerSel, setOwnerSel] = useState<string>("__auto__");
+  const [ownersSel, setOwnersSel] = useState<string[]>([]);
   const [nichoSel, setNichoSel] = useState<string>(NICHOS[0]);
   const [agendarFor, setAgendarFor] = useState<ProspLead | null>(null);
   const [pending, setPending] = useState<File[] | null>(null); // arquivo(s) escolhido(s), aguardando definir BDR
@@ -69,24 +69,30 @@ export const ProspeccaoHub: React.FC<HubProps> = ({ teamMembers, closers = [] })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [teamNames.join(",")]);
 
-  const handleFiles = async (files: File[] | null, ownerName: string, nicho: string) => {
+  // owners = [] → distribui entre todo o time; 1 nome → tudo pra ele; vários → divide igualmente
+  const handleFiles = async (files: File[] | null, owners: string[], nicho: string) => {
     if (!files?.length) return;
-    setOwnerSel(ownerName); setNichoSel(nicho); // lembra a última escolha
-    const owner = ownerName === "__auto__" ? null : ownerName;
+    setOwnersSel(owners); setNichoSel(nicho); // lembra a última escolha
+    const alvo = owners.length ? owners : teamNames; // entre quem dividir
     try {
-      let added = 0; let matched: string[] = []; let missing: string[] = [];
+      let matched: string[] = []; let missing: string[] = [];
       let acc = [...leads];
+      let fresh: ProspLead[] = [];
       for (const f of files) {
         const batch = f.name.replace(/\.(csv|xlsx?|xls)$/i, "");
-        const res = await parseFile(f, batch, nicho, owner);
+        const res = await parseFile(f, batch, nicho, null);
         matched = res.matched; missing = res.missing;
-        const existingIds = new Set(acc.map((l) => l.id));
-        const fresh = res.leads.filter((l) => !existingIds.has(l.id));
-        acc = owner ? [...acc, ...fresh] : distribute([...acc, ...fresh], teamNames);
-        added += fresh.length;
+        const existingIds = new Set([...acc, ...fresh].map((l) => l.id));
+        fresh = [...fresh, ...res.leads.filter((l) => !existingIds.has(l.id))];
       }
-      persist(acc);
-      setBanner({ ok: true, msg: `${added} lead(s) importado(s) · dono: ${owner || "distribuído entre todos"} · nicho: ${nicho} · colunas ${matched.length}/13${missing.length ? " · faltando: " + missing.join(", ") : ""}` });
+      // distribui os novos igualmente (round-robin) entre os donos escolhidos
+      const assigned = alvo.length ? fresh.map((l, i) => ({ ...l, bdr: alvo[i % alvo.length] })) : fresh;
+      persist([...acc, ...assigned]);
+      // resumo do split por dono
+      const cont: Record<string, number> = {};
+      assigned.forEach((l) => { if (l.bdr) cont[l.bdr] = (cont[l.bdr] || 0) + 1; });
+      const split = Object.entries(cont).map(([b, n]) => `${b}: ${n}`).join(" · ");
+      setBanner({ ok: true, msg: `${assigned.length} lead(s) importado(s) · ${owners.length > 1 ? "dividido entre" : "dono"} ${owners.length ? "" : "(todos) "}${split || "—"} · nicho: ${nicho} · colunas ${matched.length}/13${missing.length ? " · faltando: " + missing.join(", ") : ""}` });
     } catch (e: any) {
       setBanner({ ok: false, msg: "Falha ao ler o arquivo: " + (e?.message || e) });
     }
@@ -102,7 +108,7 @@ export const ProspeccaoHub: React.FC<HubProps> = ({ teamMembers, closers = [] })
     try { const r = await parseFile(arr[0], arr[0].name, nichoSel, null); setPreview({ count: r.leads.length, matched: r.matched.length, missing: r.missing }); }
     catch { setPreview(null); }
   };
-  const confirmImport = (owner: string, nicho: string) => { handleFiles(pending, owner, nicho); setPending(null); setPreview(null); };
+  const confirmImport = (owners: string[], nicho: string) => { handleFiles(pending, owners, nicho); setPending(null); setPreview(null); };
 
   const bdrLeads = useMemo(() => leads.filter((l) => bdrFilter === "todos" || l.bdr === bdrFilter), [leads, bdrFilter]);
   const filtered = useMemo(() => {
@@ -284,7 +290,7 @@ export const ProspeccaoHub: React.FC<HubProps> = ({ teamMembers, closers = [] })
       {open && <LeadPanel lead={open} closers={closers} onClose={() => setOpenId(null)}
         onUpdate={(patch) => updateLead(open.id, patch)} onStatus={(s) => changeStatus(open, s)} />}
       {agendarFor && <AgendarModal lead={agendarFor} closers={closers} onClose={() => setAgendarFor(null)} onConfirm={confirmAgendar} />}
-      {pending && <BdrModal team={teamNames} preview={preview} fileName={pending[0]?.name || ""} nFiles={pending.length} defOwner={ownerSel} defNicho={nichoSel}
+      {pending && <BdrModal team={teamNames} preview={preview} fileName={pending[0]?.name || ""} nFiles={pending.length} defOwners={ownersSel} defNicho={nichoSel}
         onCancel={() => { setPending(null); setPreview(null); }} onConfirm={confirmImport} />}
     </div>
   );
@@ -333,16 +339,21 @@ const EmptyState: React.FC<{ onOpen: () => void }> = ({ onOpen }) => (
   </div>
 );
 
-// ---------------- Modal pós-arquivo: escolher BDR/dono + nicho ----------------
-const BdrModal: React.FC<{ team: string[]; preview: { count: number; matched: number; missing: string[] } | null; fileName: string; nFiles: number; defOwner: string; defNicho: string; onCancel: () => void; onConfirm: (owner: string, nicho: string) => void }> = ({ team, preview, fileName, nFiles, defOwner, defNicho, onCancel, onConfirm }) => {
-  const [owner, setOwner] = useState(defOwner);
+// ---------------- Modal pós-arquivo: escolher BDR(s)/dono(s) + nicho ----------------
+const BdrModal: React.FC<{ team: string[]; preview: { count: number; matched: number; missing: string[] } | null; fileName: string; nFiles: number; defOwners: string[]; defNicho: string; onCancel: () => void; onConfirm: (owners: string[], nicho: string) => void }> = ({ team, preview, fileName, nFiles, defOwners, defNicho, onCancel, onConfirm }) => {
+  const [owners, setOwners] = useState<string[]>(defOwners);
   const [nicho, setNicho] = useState(defNicho);
+  const toggle = (n: string) => setOwners((o) => (o.includes(n) ? o.filter((x) => x !== n) : [...o, n]));
+  const total = preview?.count || 0;
+  const alvo = owners.length ? owners : team;           // quem recebe (vazio = todos)
+  const base = Math.floor(total / (alvo.length || 1));  // split estimado
+  const resto = total % (alvo.length || 1);
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center">
       <div className="absolute inset-0 bg-black/60" onClick={onCancel} />
       <div className={`relative w-full max-w-md ${card} p-5`}>
         <div className="flex items-center gap-2 mb-3">
-          <Users size={16} style={{ color: RED }} /><h3 className="text-sm font-bold text-white">Para qual BDR vai essa lista?</h3>
+          <Users size={16} style={{ color: RED }} /><h3 className="text-sm font-bold text-white">Para qual(is) BDR(s) vai essa lista?</h3>
           <div className="flex-1" /><button onClick={onCancel} className="text-[var(--color-v4-text-muted)] hover:text-white"><X size={18} /></button>
         </div>
         <div className="rounded-lg bg-[var(--color-v4-surface)] border border-[var(--color-v4-border)] px-3 py-2 mb-3 text-[11px] text-[var(--color-v4-text-muted)]">
@@ -351,11 +362,28 @@ const BdrModal: React.FC<{ team: string[]; preview: { count: number; matched: nu
         </div>
         <div className="space-y-3">
           <div>
-            <label className="text-[11px] text-[var(--color-v4-text-muted)] uppercase font-semibold">BDR / dono da lista *</label>
-            <select value={owner} onChange={(e) => setOwner(e.target.value)} autoFocus className="w-full mt-1 border border-[var(--color-v4-border)] bg-[var(--color-v4-surface)] text-white rounded-lg px-3 py-2 text-sm">
-              <option value="__auto__">Distribuir entre todos</option>
-              {team.map((n) => <option key={n} value={n}>{n}</option>)}
-            </select>
+            <div className="flex items-center justify-between">
+              <label className="text-[11px] text-[var(--color-v4-text-muted)] uppercase font-semibold">Dono(s) da lista — marque um ou mais</label>
+              <button onClick={() => setOwners(owners.length === team.length ? [] : [...team])} className="text-[10.5px] underline text-[var(--color-v4-text-muted)] hover:text-white">{owners.length === team.length ? "limpar" : "todos"}</button>
+            </div>
+            <div className="grid grid-cols-2 gap-1.5 mt-1.5">
+              {team.map((n) => {
+                const on = owners.includes(n);
+                return (
+                  <button key={n} onClick={() => toggle(n)} className={`flex items-center gap-2 px-2.5 py-2 rounded-lg border text-sm text-left ${on ? "text-white border-transparent" : "text-[var(--color-v4-text-muted)] border-[var(--color-v4-border)] hover:bg-[var(--color-v4-surface)]"}`} style={on ? { background: RED } : undefined}>
+                    <span className={`w-4 h-4 shrink-0 rounded flex items-center justify-center border-2 ${on ? "border-white/70" : "border-[var(--color-v4-text-muted)]"}`}>{on && <Check size={11} className="text-white" strokeWidth={3} />}</span>
+                    {n}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-[11px] mt-1.5" style={{ color: RED }}>
+              {owners.length === 0
+                ? `Nenhum marcado → divide entre todos (${team.length}) · ~${base}${resto ? `–${base + 1}` : ""} cada`
+                : owners.length === 1
+                  ? `Tudo para ${owners[0]} (${total} lead(s))`
+                  : `Divide ${total} entre ${owners.length} → ~${base}${resto ? `–${base + 1}` : ""} cada (${owners.join(", ")})`}
+            </p>
           </div>
           <div>
             <label className="text-[11px] text-[var(--color-v4-text-muted)] uppercase font-semibold">Nicho da lista</label>
@@ -366,7 +394,7 @@ const BdrModal: React.FC<{ team: string[]; preview: { count: number; matched: nu
         </div>
         <div className="flex gap-2 mt-4">
           <button onClick={onCancel} className="py-2 px-3 rounded-lg border border-[var(--color-v4-border)] text-[var(--color-v4-text-muted)] text-sm">Cancelar</button>
-          <button onClick={() => onConfirm(owner, nicho)} className="flex-1 inline-flex items-center justify-center gap-2 py-2 rounded-lg text-white text-sm font-bold" style={{ background: RED }}>
+          <button onClick={() => onConfirm(owners, nicho)} className="flex-1 inline-flex items-center justify-center gap-2 py-2 rounded-lg text-white text-sm font-bold" style={{ background: RED }}>
             <Upload size={14} /> Importar {preview ? `${preview.count} lead(s)` : ""}
           </button>
         </div>
