@@ -457,13 +457,46 @@ const TabelaView: React.FC<{
 
 // ================= GESTÃO (dashboards) =================
 const GestaoPanel: React.FC<{ leads: ProspLead[]; team: string[]; onDemo: () => void }> = ({ leads, team, onDemo }) => {
+  const fm = useMemo(() => funnelMetrics(leads), [leads]);
   const quality = useMemo(() => listQuality(leads), [leads]);
   const matrix = useMemo(() => maturityConversion(leads), [leads]);
   const prod = useMemo(() => bdrProductivity(leads, team), [leads, team]);
   const semAtividade = prod.every((p) => p.atividades === 0);
+  const maxStage = Math.max(1, ...fm.stages.map((s) => s.count), fm.perdidos);
 
   return (
     <div className="space-y-4">
+      {/* 0) Funil do pipeline — reage a cada movimento do Kanban / mudança de etapa */}
+      <div className={`${card} p-4`}>
+        <div className="flex items-center gap-2 mb-1"><BarChart3 size={15} style={{ color: RED }} /><h3 className="text-sm font-bold text-white">Funil do Pipeline</h3><span className="text-[11px] text-[var(--color-v4-text-muted)]">atualiza ao mover cards / mudar etapa</span></div>
+        <p className="text-[11px] text-[var(--color-v4-text-muted)] mb-3">Quantos leads em cada etapa agora, e a conversão etapa a etapa (cumulativa).</p>
+        <div className="space-y-1.5">
+          {fm.stages.map((s) => (
+            <div key={s.status} className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full shrink-0" style={{ background: STATUS_COLOR[s.status] }} />
+              <span className="text-[12px] text-white w-40 shrink-0 truncate">{s.label}</span>
+              <div className="flex-1 h-5 rounded bg-[var(--color-v4-surface)] overflow-hidden">
+                <div className="h-full rounded" style={{ width: `${Math.round((100 * s.count) / maxStage)}%`, background: STATUS_COLOR[s.status], minWidth: s.count ? 2 : 0 }} />
+              </div>
+              <span className="text-[12px] font-bold text-white w-8 text-right">{s.count}</span>
+              <span className="text-[10px] text-[var(--color-v4-text-muted)] w-14 text-right">{s.convPrev != null ? `▲${s.convPrev}%` : ""}</span>
+            </div>
+          ))}
+          <div className="flex items-center gap-2 pt-1 border-t border-[var(--color-v4-border)] mt-1">
+            <span className="w-2 h-2 rounded-full shrink-0" style={{ background: STATUS_COLOR.perdido }} />
+            <span className="text-[12px] text-white w-40 shrink-0">Perdido / Descarte</span>
+            <div className="flex-1 h-5 rounded bg-[var(--color-v4-surface)] overflow-hidden"><div className="h-full rounded" style={{ width: `${Math.round((100 * fm.perdidos) / maxStage)}%`, background: STATUS_COLOR.perdido, minWidth: fm.perdidos ? 2 : 0 }} /></div>
+            <span className="text-[12px] font-bold text-white w-8 text-right">{fm.perdidos}</span>
+            <span className="w-14" />
+          </div>
+        </div>
+        <div className="grid grid-cols-3 gap-2 mt-3">
+          <Kpi label="No funil" value={fm.total} />
+          <Kpi label="Tx. agendamento" value={`${fm.taxaAgendamento}%`} accent />
+          <Kpi label="Tx. ganho" value={`${fm.taxaGanho}%`} />
+        </div>
+      </div>
+
       {/* 1) Qualidade da lista */}
       <div className={`${card} p-4`}>
         <div className="flex items-center gap-2 mb-1"><ClipboardList size={15} style={{ color: RED }} /><h3 className="text-sm font-bold text-white">Qualidade da Lista</h3></div>
