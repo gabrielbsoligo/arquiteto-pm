@@ -229,7 +229,7 @@ export const ProspeccaoHub: React.FC<HubProps> = ({ teamMembers, closers = [] })
               <table className="w-full text-sm min-w-[920px]">
                 <thead className="bg-[var(--color-v4-surface)] text-[var(--color-v4-text-muted)] text-left text-[11px] uppercase tracking-wide">
                   <tr>
-                    <th className="px-3 py-2.5 w-8"><input type="checkbox" checked={allVisibleSelected} onChange={toggleAllVisible} title="Selecionar todos" className="accent-[var(--color-v4-red)]" /></th>
+                    <th className="px-3 py-2.5 w-8"><Cbox checked={allVisibleSelected} onChange={toggleAllVisible} title="Selecionar / limpar todos" /></th>
                     <th className="px-3 py-2.5">Empresa</th><th className="px-3 py-2.5">Nicho</th><th className="px-3 py-2.5">Cidade/UF</th>
                     <th className="px-3 py-2.5">Contato</th><th className="px-3 py-2.5">Dono</th><th className="px-3 py-2.5">Presença</th>
                     <th className="px-3 py-2.5">Status</th><th className="px-3 py-2.5"></th>
@@ -238,7 +238,7 @@ export const ProspeccaoHub: React.FC<HubProps> = ({ teamMembers, closers = [] })
                 <tbody>
                   {filtered.map((l) => (
                     <tr key={l.id} className={`border-t border-[var(--color-v4-border)] hover:bg-[var(--color-v4-card-hover)] cursor-pointer text-white ${selected.has(l.id) ? "bg-[var(--color-v4-surface)]/60" : ""}`} onClick={() => setOpenId(l.id)}>
-                      <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={selected.has(l.id)} onChange={() => toggleSel(l.id)} className="accent-[var(--color-v4-red)]" /></td>
+                      <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}><Cbox checked={selected.has(l.id)} onChange={() => toggleSel(l.id)} title="Selecionar este lead" /></td>
                       <td className="px-3 py-2.5 font-semibold flex items-center gap-2"><Building2 size={14} className="text-[var(--color-v4-text-muted)]" />{l.empresa || "—"}</td>
                       <td className="px-3 py-2.5 text-[var(--color-v4-text-muted)] text-[11px]">{l.nicho || "—"}</td>
                       <td className="px-3 py-2.5 text-[var(--color-v4-text-muted)]">{[l.cidade, l.estado].filter(Boolean).join("/") || "—"}</td>
@@ -289,6 +289,15 @@ export const ProspeccaoHub: React.FC<HubProps> = ({ teamMembers, closers = [] })
     </div>
   );
 };
+
+// Checkbox customizado — nativo desmarcado some no dark; este fica sempre visível.
+const Cbox: React.FC<{ checked: boolean; onChange: () => void; title?: string }> = ({ checked, onChange, title }) => (
+  <button type="button" title={title} onClick={(e) => { e.stopPropagation(); onChange(); }}
+    className={`w-5 h-5 shrink-0 rounded flex items-center justify-center border-2 transition-colors ${checked ? "border-transparent" : "border-[var(--color-v4-text-muted)] bg-[var(--color-v4-bg)] hover:border-[var(--color-v4-red)]"}`}
+    style={checked ? { background: RED } : undefined}>
+    {checked && <Check size={13} className="text-white" strokeWidth={3} />}
+  </button>
+);
 
 const TabBtn: React.FC<{ active: boolean; onClick: () => void; label: string }> = ({ active, onClick, label }) => (
   <button onClick={onClick} className={`px-3 py-1.5 rounded-lg text-xs font-semibold border ${active ? "text-white border-transparent" : "text-[var(--color-v4-text-muted)] border-[var(--color-v4-border)] hover:bg-[var(--color-v4-card-hover)]"}`}
