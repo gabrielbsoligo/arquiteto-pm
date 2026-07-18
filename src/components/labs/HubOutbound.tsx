@@ -58,8 +58,9 @@ export const HubOutbound: React.FC<HubProps> = ({ teamMembers, closers = [] }) =
   const [agendarFor, setAgendarFor] = useState<ProspLead | null>(null);
   const [perdaFor, setPerdaFor] = useState<ProspLead | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  // filtros: nicho, período (criado/atualizado)
+  // filtros: nicho, maturidade, período (criado/atualizado)
   const [nichoFilter, setNichoFilter] = useState<string>("todos");
+  const [matFilter, setMatFilter] = useState<Nivel | "todos">("todos");
   const [periodoPreset, setPeriodoPreset] = useState<"tudo" | "hoje" | "7d" | "30d" | "custom">("tudo");
   const [periodoBase, setPeriodoBase] = useState<"createdAt" | "updatedAt">("createdAt");
   const [dtDe, setDtDe] = useState(""); const [dtAte, setDtAte] = useState("");
@@ -107,27 +108,28 @@ export const HubOutbound: React.FC<HubProps> = ({ teamMembers, closers = [] }) =
     }
     return [-Infinity, Infinity];
   }, [periodoPreset, dtDe, dtAte]);
-  const filtrosAtivos = nichoFilter !== "todos" || periodoPreset !== "tudo" || !!statusFilter;
+  const filtrosAtivos = nichoFilter !== "todos" || matFilter !== "todos" || periodoPreset !== "tudo" || !!statusFilter;
 
   const bdrLeads = useMemo(() => leads.filter((l) => bdrFilter === "todos" || l.bdr === bdrFilter), [leads, bdrFilter]);
-  // filtro comum (aplica em Kanban, Tabela e Gestão): busca + nicho + período
+  // filtro comum (aplica em Kanban, Tabela e Gestão): busca + nicho + maturidade + período
   const common = useMemo(() => {
     const s = search.trim().toLowerCase();
     const [from, to] = periodRange;
     return bdrLeads.filter((l) => {
       if (nichoFilter !== "todos" && (l.nicho || "") !== nichoFilter) return false;
+      if (matFilter !== "todos" && (l.maturidadeNivel || maturidadeBanda(l.maturidade)) !== matFilter) return false;
       const t = new Date((periodoBase === "updatedAt" ? l.updatedAt : l.createdAt) || l.createdAt).getTime();
       if (!(t >= from && t <= to)) return false;
       if (s && !(l.empresa.toLowerCase().includes(s) || l.cidade.toLowerCase().includes(s) || (l.decisorNome || "").toLowerCase().includes(s))) return false;
       return true;
     });
-  }, [bdrLeads, nichoFilter, periodRange, periodoBase, search]);
+  }, [bdrLeads, nichoFilter, matFilter, periodRange, periodoBase, search]);
   // tabela adiciona o filtro de etapa; Kanban usa etapa pra mostrar só a coluna
   const filtered = useMemo(() => common.filter((l) => !statusFilter || l.status === statusFilter).sort((a, b) => b.maturidade - a.maturidade), [common, statusFilter]);
 
   const metrics = useMemo(() => funnelMetrics(common), [common]);
   const countByBdr = (b: string) => leads.filter((l) => l.bdr === b).length;
-  const limparFiltros = () => { setNichoFilter("todos"); setPeriodoPreset("tudo"); setStatusFilter(null); setDtDe(""); setDtAte(""); };
+  const limparFiltros = () => { setNichoFilter("todos"); setMatFilter("todos"); setPeriodoPreset("tudo"); setStatusFilter(null); setDtDe(""); setDtAte(""); };
   const open = openId ? leads.find((l) => l.id === openId) || null : null;
 
   // seleção (remover leads)
@@ -269,6 +271,10 @@ export const HubOutbound: React.FC<HubProps> = ({ teamMembers, closers = [] }) =
               <select value={nichoFilter} onChange={(e) => setNichoFilter(e.target.value)} className="rounded-lg border border-[var(--color-v4-border)] bg-[var(--color-v4-surface)] text-white px-2 py-1.5 text-xs">
                 <option value="todos">Todos os nichos</option>
                 {nichosDisponiveis.map((n) => <option key={n} value={n}>{n}</option>)}
+              </select>
+              <select value={matFilter} onChange={(e) => setMatFilter(e.target.value as Nivel | "todos")} className="rounded-lg border border-[var(--color-v4-border)] bg-[var(--color-v4-surface)] text-white px-2 py-1.5 text-xs" title="Maturidade digital">
+                <option value="todos">Toda maturidade</option>
+                {NIVEIS.map((nv) => <option key={nv} value={nv}>Maturidade {nv}</option>)}
               </select>
               <select value={statusFilter || ""} onChange={(e) => setStatusFilter((e.target.value || null) as Status | null)} className="rounded-lg border border-[var(--color-v4-border)] bg-[var(--color-v4-surface)] text-white px-2 py-1.5 text-xs">
                 <option value="">Todas as etapas</option>
