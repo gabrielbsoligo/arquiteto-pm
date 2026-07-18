@@ -5,7 +5,7 @@ import {
 } from "lucide-react";
 import {
   parseFile, distribute, loadLeads, saveLeads, channelLink, callLink, whatsappLink,
-  generateApproach, toCSV, downloadCSV, STATUS_LABELS, type ProspLead,
+  generateApproach, toCSV, downloadCSV, STATUS_LABELS, maturidadeMotivo, type ProspLead,
 } from "./prospeccao/prospLib";
 
 /**
@@ -62,7 +62,8 @@ export const ProspeccaoHub: React.FC = () => {
     const s = search.trim().toLowerCase();
     return leads.filter((l) =>
       (bdrFilter === "todos" || l.bdr === bdrFilter) &&
-      (!s || l.empresa.toLowerCase().includes(s) || l.cidade.toLowerCase().includes(s) || l.socio1.toLowerCase().includes(s)));
+      (!s || l.empresa.toLowerCase().includes(s) || l.cidade.toLowerCase().includes(s) || l.socio1.toLowerCase().includes(s)))
+      .sort((a, b) => b.maturidade - a.maturidade); // prioridade: mais maduro digitalmente primeiro
   }, [leads, bdrFilter, search]);
 
   const countByBdr = (b: string) => leads.filter((l) => l.bdr === b).length;
@@ -151,7 +152,7 @@ export const ProspeccaoHub: React.FC = () => {
                 </tbody>
               </table>
             </div>
-            <p className="text-[11px] text-[var(--color-v4-text-muted)] mt-2">{filtered.length} lead(s) exibido(s) · salvos neste navegador (localStorage)</p>
+            <p className="text-[11px] text-[var(--color-v4-text-muted)] mt-2">{filtered.length} lead(s) · ordenados por maturidade (prioridade ↓) · nota automática pela presença digital · salvos neste navegador</p>
           </>
         )}
       </div>
@@ -267,9 +268,10 @@ const LeadPanel: React.FC<{ lead: ProspLead; onClose: () => void; onUpdate: (pat
           {/* maturidade + IA */}
           <div className={`${card} p-4`}>
             <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-bold text-white">Maturidade digital</p>
-                <p className="text-[11px] text-[var(--color-v4-text-muted)]">Avalie de 1 a 5 após a investigação</p>
+              <div className="pr-2">
+                <p className="text-sm font-bold text-white">Maturidade digital <span className="text-[10px] font-medium text-[var(--color-v4-text-muted)] align-middle">· nota automática</span></p>
+                <p className="text-[11px] text-[var(--color-v4-text-muted)]">{maturidadeMotivo(lead)}</p>
+                <p className="text-[10px] text-[var(--color-v4-text-muted)] mt-0.5 opacity-70">Calculada pela presença digital — ajuste após investigar.</p>
               </div>
               <Stars value={lead.maturidade} onChange={(v) => onUpdate({ maturidade: v })} />
             </div>

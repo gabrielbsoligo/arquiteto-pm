@@ -102,7 +102,7 @@ export async function parseFile(file: File, batch: string): Promise<ParseResult>
     const row = matrix[r] || [];
     const empresa = get(row, "empresa");
     if (!empresa && !get(row, "email") && !get(row, "whatsapp1")) continue; // linha vazia
-    leads.push({
+    const lead: ProspLead = {
       id: `${batch}-${r}-${Math.abs(hashStr(empresa + get(row, "email") + r))}`,
       empresa, socio1: get(row, "socio1"), socio2: get(row, "socio2"),
       whatsapp1: get(row, "whatsapp1"), whatsapp2: get(row, "whatsapp2"),
@@ -111,7 +111,9 @@ export async function parseFile(file: File, batch: string): Promise<ParseResult>
       instagram: get(row, "instagram"), facebook: get(row, "facebook"),
       linkedin: get(row, "linkedin"), youtube: get(row, "youtube"),
       bdr: null, maturidade: 0, abordagem: "", status: "novo", notas: "", batch, createdAt: new Date().toISOString(),
-    });
+    };
+    lead.maturidade = autoMaturidade(lead); // nota automática inicial (norte de prioridade)
+    leads.push(lead);
   }
   const matchedFields = Object.keys(hmap);
   const matched = LEMIT_COLUNAS.filter((c) => matchedFields.includes(canonicalOf(c)));
@@ -127,6 +129,24 @@ function canonicalOf(lemitCol: string): string {
 }
 
 function hashStr(s: string): number { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return h; }
+
+// ---------------- maturidade digital automática (1..5) ----------------
+// Sinal = presença digital nos canais. Pesos: site e canais "profissionais"
+// (LinkedIn/YouTube) pesam mais; Facebook menos. Serve de NORTE de prioridade
+// (quanto mais madura digitalmente, mais investe/valoriza marketing). Editável pelo BDR.
+export function autoMaturidade(lead: { site?: string; instagram?: string; linkedin?: string; youtube?: string; facebook?: string }): number {
+  const raw =
+    (lead.site ? 1.5 : 0) + (lead.instagram ? 1 : 0) + (lead.linkedin ? 1 : 0) +
+    (lead.youtube ? 1 : 0) + (lead.facebook ? 0.5 : 0);
+  return Math.max(1, Math.min(5, Math.round(raw)));
+}
+
+export function maturidadeMotivo(lead: ProspLead): string {
+  const pares: [string, string][] = [["Site", lead.site], ["Instagram", lead.instagram], ["LinkedIn", lead.linkedin], ["YouTube", lead.youtube], ["Facebook", lead.facebook]];
+  const on = pares.filter(([, v]) => v).map(([n]) => n);
+  const off = pares.filter(([, v]) => !v).map(([n]) => n);
+  return `Presentes: ${on.join(", ") || "nenhum"}${off.length ? ` · Faltam: ${off.join(", ")}` : ""}`;
+}
 
 // ---------------- links / click-to-call ----------------
 const q = (s: string) => encodeURIComponent(s.trim());
@@ -162,7 +182,12 @@ export function whatsappLink(phone: string): string {
 // ---------------- persistência (localStorage) ----------------
 const KEY = "v4_prospeccao_leads_v1";
 export function loadLeads(): ProspLead[] {
-  try { const raw = localStorage.getItem(KEY); return raw ? (JSON.parse(raw) as ProspLead[]) : []; } catch { return []; }
+  try {
+    const raw = localStorage.getItem(KEY);
+    const arr = raw ? (JSON.parse(raw) as ProspLead[]) : [];
+    // backfill: leads antigos salvos sem nota recebem a maturidade automática
+    return arr.map((l) => (l.maturidade && l.maturidade > 0 ? l : { ...l, maturidade: autoMaturidade(l) }));
+  } catch { return []; }
 }
 export function saveLeads(leads: ProspLead[]): void {
   try { localStorage.setItem(KEY, JSON.stringify(leads)); } catch { /* quota */ }
