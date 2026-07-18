@@ -461,6 +461,10 @@ function saveDismissed(s: Set<string>) { try { localStorage.setItem(DISMISS_KEY,
 export function markDismissed(ids: string[]): void {
   const s = loadDismissed(); ids.forEach((id) => s.add(id)); saveDismissed(s);
 }
+/** Tira ids do "descartados" — usado pelo "Enviar ao Hub" (reenvio explícito sempre entrega). */
+export function undismiss(ids: string[]): void {
+  const s = loadDismissed(); let ch = false; ids.forEach((id) => { if (s.delete(id)) ch = true; }); if (ch) saveDismissed(s);
+}
 
 /**
  * Carrega os leads do Hub INTEGRANDO com a Prospecção: o upload acontece só na

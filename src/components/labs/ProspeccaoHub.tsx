@@ -10,6 +10,7 @@ import {
   generateApproach, toCSV, downloadCSV, dedupeByCompany, enrichProsp, distributeQualified, isIncompleto, allPhonesProsp,
   STATUS_LABELS, STATUS_ORDER, NICHOS, maturidadeMotivo, type ProspLead, type ReqCampo,
 } from "./prospeccao/prospLib";
+import { undismiss as hubUndismiss } from "./hubOutbound/hubLib";
 
 /**
  * ProspeccaoHub — Hub de Prospecção Outbound (V4). Protótipo no clone Labs.
@@ -178,6 +179,7 @@ export const ProspeccaoHub: React.FC<HubProps> = ({ teamMembers, closers = [] })
     if (!pendentes.length) { setBanner({ ok: false, msg: "Nada em revisão pra enviar." }); return; }
     const redistribuidos = distributeQualified(pendentes, alvo);
     const byId = new Map(redistribuidos.map((l) => [l.id, l]));
+    hubUndismiss(pendentes.map((l) => l.id)); // reenvio explícito sempre entrega (mesmo se removido antes no Hub)
     persist(leads.map((l) => { const r = byId.get(l.id); return r ? { ...r, enviadoHub: true, updatedAt: new Date().toISOString() } : l; }));
     setSendOpen(false);
     const cont: Record<string, number> = {};
