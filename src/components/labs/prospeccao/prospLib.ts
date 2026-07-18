@@ -50,6 +50,8 @@ export interface ProspLead {
   enriquecidoEm?: string;
   linhasUnificadas?: number;          // quantas linhas da lista viraram este card
   enviadoHub?: boolean;               // já revisado e enviado pro Hub Outbound?
+  nomeFonte?: "lista" | "site" | "email" | "cnpj" | "pessoa"; // de onde veio o nome da empresa
+  nomeSuspeito?: boolean;             // nome ainda parece de pessoa (verificar antes de enviar)
 }
 
 export interface TelefoneExtra { numero: string; tipo: string; }
@@ -395,6 +397,63 @@ export function dedupeByCompany(leads: ProspLead[]): ProspLead[] {
     out.push({ ...base, sociosExtra, telefonesExtra, emailsExtra, linhasUnificadas: g.length });
   }
   return out;
+}
+
+// ---- INTELIGÊNCIA de NOME DE EMPRESA ----
+// Muitas listas trazem o nome de uma PESSOA na coluna da empresa (ou vêm vazias).
+// Aqui a gente resolve pra um nome de EMPRESA de verdade antes de ir pro Hub.
+const EMAIL_GENERICO = /@(gmail|hotmail|outlook|yahoo|icloud|bol|uol|terra|live|msn|me)\./i;
+const EMPRESA_KW = /ltda|eireli|\bs\.?a\.?\b|\bme\b|epp|mei|incorpor|constru|tech|softwar|sistemas|comerci|com[eé]rcio|ind[uú]stri|servi[çc]|clinic|cl[íi]nica|academia|consultor|assessoria|associa|escola|col[eé]gio|restaurante|padaria|auto\s|autope|mercad|loja|studio|est[uú]dio|group|holding|solu[çc]|imobili|transport|log[íi]stic|contabil|advocac|engenh|distribuidora|farm[aá]ci|pet\b|odonto|estetic|est[eé]tica|energ|solar|fitness/i;
+/** o texto parece nome de PESSOA (e não de empresa)? */
+function pareceNomePessoa(nome: string, lead: ProspLead): boolean {
+  const n = (nome || "").trim();
+  if (!n) return true;
+  if (EMPRESA_KW.test(n)) return false;                       // tem marca de empresa → é empresa
+  const socios = [lead.socio1, lead.socio2, lead.decisorNome].filter(Boolean).map((s) => s.toLowerCase().trim());
+  if (socios.includes(n.toLowerCase())) return true;          // igual a um sócio → é pessoa
+  return false;                                               // na dúvida, mantém como está
+}
+/** deixa "paoquente.com.br"/"contato@techvale.com" → "Paoquente" / "Techvale" */
+function nomeDeDominio(url: string): string {
+  const d = String(url || "").replace(/^https?:\/\//i, "").replace(/^www\./i, "").split(/[/?#@]/).pop() || "";
+  const host = d.includes("@") ? d.split("@")[1] : d;
+  const root = (host.split(".")[0] || "").trim();
+  if (!root) return "";
+  return root.replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+/**
+ * Resolve o nome da empresa. Ordem: nome válido da lista → domínio do site →
+ * domínio do e-mail (não genérico) → consulta CNPJ (protótipo: razão social
+ * simulada, rotulada) → mantém o que tem e sinaliza p/ verificação.
+ */
+export function resolveCompanyName(lead: ProspLead): { nome: string; fonte: NonNullable<ProspLead["nomeFonte"]>; suspeito: boolean } {
+  const atual = (lead.empresa || "").trim();
+  if (atual && !pareceNomePessoa(atual, lead)) return { nome: atual, fonte: "lista", suspeito: false };
+  // 1) domínio do site
+  const bySite = lead.site ? nomeDeDominio(lead.site) : "";
+  if (bySite) return { nome: bySite, fonte: "site", suspeito: false };
+  // 2) domínio do e-mail (não genérico)
+  if (lead.email && !EMAIL_GENERICO.test(lead.email)) {
+    const byMail = nomeDeDominio(lead.email);
+    if (byMail) return { nome: byMail, fonte: "email", suspeito: false };
+  }
+  // 3) CNPJ → razão social (PROTÓTIPO simulado; produção: API ReceitaWS/CNPJ.ws por CNPJ)
+  if (onlyDigits(lead.cnpj || "").length >= 11) {
+    return { nome: razaoSocialSimulada(lead), fonte: "cnpj", suspeito: false };
+  }
+  // 4) não deu — mantém e sinaliza
+  return { nome: atual || (lead.socio1 || "Empresa sem nome"), fonte: "pessoa", suspeito: true };
+}
+const RAMO_POR_NICHO: [RegExp, string][] = [
+  [/saas|tecnolog|software|tech|app/, "Tecnologia"], [/energ|solar|fotovolt|renov/, "Energia Solar"],
+  [/academ|esporte|fitness/, "Fitness"], [/imob|incorpor|constru/, "Incorporadora"],
+  [/saud|saúde|beleza|clinic|clínic|estetic|estétic|odont/, "Saúde"], [/varej|commerce|loja|ecom/, "Comércio"],
+];
+function razaoSocialSimulada(lead: ProspLead): string {
+  const cidade = (lead.cidade || "").trim();
+  const ramo = (RAMO_POR_NICHO.find(([re]) => re.test((lead.nicho || "").toLowerCase())) || [null, "Serviços"])[1];
+  const base = lead.socio1 ? lead.socio1.split(" ")[0] : (cidade || "Vale");
+  return `${base} ${ramo} LTDA`;
 }
 
 // ---- enriquecimento (Lemit) — determinístico (protótipo). Produção: API por CNPJ. ----

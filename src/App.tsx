@@ -28,6 +28,7 @@ import { TVMode } from "./components/TVMode";
 import { LabPerfSdrRoute } from "./components/labs/PerfSdrDashboard";
 import { LabProspeccaoRoute } from "./components/labs/ProspeccaoHub";
 import { LabHubOutboundRoute } from "./components/labs/HubOutbound";
+import { LabDisparosRoute } from "./components/labs/DisparosCalc";
 import { RoletaAssignModal } from "./components/RoletaAssignModal";
 import type { Lead } from "./types";
 import { supabase } from "./lib/supabase";
@@ -267,6 +268,7 @@ const MainApp: React.FC = () => {
       case "perf_visual": return <LabPerfSdrRoute />;
       case "prospeccao": return <LabProspeccaoRoute />;
       case "hub_outbound": return <LabHubOutboundRoute />;
+      case "disparos": return <LabDisparosRoute />;
       case "call_quality": return <CallQualityView />;
       case "geral": return <GeralView />;
       case "equipe": return <EquipeView />;
@@ -326,6 +328,18 @@ export default function App() {
         <Toaster position="top-right" />
         <div className="flex h-screen w-full bg-[var(--color-v4-bg)]">
           <LabHubOutboundRoute />
+        </div>
+      </AppProvider>
+    );
+  }
+
+  // Rota standalone da Calculadora de Disparos (WhatsApp)
+  if (labsView === 'disparos') {
+    return (
+      <AppProvider>
+        <Toaster position="top-right" />
+        <div className="flex h-screen w-full bg-[var(--color-v4-bg)]">
+          <LabDisparosRoute />
         </div>
       </AppProvider>
     );

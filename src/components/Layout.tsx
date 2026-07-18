@@ -25,6 +25,7 @@ import {
   Gauge,
   Rocket,
   LayoutGrid,
+  Send,
 } from "lucide-react";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
@@ -34,7 +35,7 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export type View = "pipeline" | "leads" | "reunioes" | "agendas_time" | "performance" | "metas" | "comissoes" | "contratos" | "equipe" | "dashboard" | "blackbox" | "leadbroker" | "auditoria" | "prepcall" | "3c_manual" | "roleta_historico" | "playbook" | "perf_sdr" | "perf_visual" | "call_quality" | "geral" | "prospeccao" | "hub_outbound";
+export type View = "pipeline" | "leads" | "reunioes" | "agendas_time" | "performance" | "metas" | "comissoes" | "contratos" | "equipe" | "dashboard" | "blackbox" | "leadbroker" | "auditoria" | "prepcall" | "3c_manual" | "roleta_historico" | "playbook" | "perf_sdr" | "perf_visual" | "call_quality" | "geral" | "prospeccao" | "hub_outbound" | "disparos";
 
 export const Layout: React.FC<{
   children: ReactNode;
@@ -53,6 +54,9 @@ export const Layout: React.FC<{
     { id: "leads" as const, label: "Leads", icon: Target },
     { id: "prospeccao" as const, label: "Prospecção", icon: Rocket, badge: "novo" },
     { id: "hub_outbound" as const, label: "Hub Outbound", icon: LayoutGrid, badge: "novo" },
+    { id: "perf_sdr" as const, label: "Perf. SDR", icon: UserRoundCheck, allowedRoles: ['gestor'] as TeamRole[] },
+    { id: "perf_visual" as const, label: "Perf. SDR Visual", icon: Gauge, badge: "novo", allowedRoles: ['gestor', 'sdr', 'closer'] as TeamRole[] },
+    { id: "disparos" as const, label: "Disparos WhatsApp", icon: Send, badge: "novo" },
     { id: "reunioes" as const, label: "Reuniões", icon: Calendar },
     { id: "agendas_time" as const, label: "Agendas", icon: CalendarClock },
     { id: "prepcall" as const, label: "Prep Call", icon: Sparkles },
@@ -66,8 +70,6 @@ export const Layout: React.FC<{
     { id: "leadbroker" as const, label: "LeadBroker", icon: Box },
     { id: "auditoria" as const, label: "Auditoria", icon: ClipboardCheck, allowedRoles: ['gestor'] as TeamRole[] },
     { id: "roleta_historico" as const, label: "Roleta SDR", icon: Repeat, allowedRoles: ['gestor'] as TeamRole[] },
-    { id: "perf_sdr" as const, label: "Perf. SDR", icon: UserRoundCheck, allowedRoles: ['gestor'] as TeamRole[] },
-    { id: "perf_visual" as const, label: "Perf. SDR Visual", icon: Gauge, badge: "novo", allowedRoles: ['gestor', 'sdr', 'closer'] as TeamRole[] },
     { id: "call_quality" as const, label: "Qualidade Ligação", icon: Headphones, allowedRoles: ['gestor'] as TeamRole[] },
     { id: "equipe" as const, label: "Equipe", icon: Users },
   ] as Array<{ id: View; label: string; icon: any; allowedRoles?: TeamRole[]; badge?: string }>;

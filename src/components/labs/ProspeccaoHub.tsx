@@ -7,7 +7,7 @@ import {
 import { useAppStore } from "../../store";
 import {
   parseFile, loadLeads, saveLeads, channelLink, telLink, callLink, whatsappLink,
-  generateApproach, toCSV, downloadCSV, dedupeByCompany, enrichProsp, distributeQualified, isIncompleto, allPhonesProsp,
+  generateApproach, toCSV, downloadCSV, dedupeByCompany, enrichProsp, distributeQualified, isIncompleto, allPhonesProsp, resolveCompanyName,
   STATUS_LABELS, STATUS_ORDER, NICHOS, maturidadeMotivo, type ProspLead, type ReqCampo,
 } from "./prospeccao/prospLib";
 import { pushToHub } from "./hubOutbound/hubLib";
@@ -101,13 +101,21 @@ export const ProspeccaoHub: React.FC<HubProps> = ({ teamMembers, closers = [] })
       const novos = unificados.filter((l) => !existingIds.has(l.id));
       // 2) ENRIQUECE no Lemit (dados cadastrais + telefones + quadro societário + decisor)
       const enriquecidos = novos.map((l) => ({ ...enrichProsp(l), enviadoHub: false, updatedAt: new Date().toISOString() }));
+      // 2b) INTELIGÊNCIA de NOME: garante nome de EMPRESA (site/email/CNPJ) — não nome de pessoa
+      let corrigidos = 0; let suspeitos = 0;
+      const comNome = enriquecidos.map((l) => {
+        const r = resolveCompanyName(l);
+        if (r.fonte !== "lista") corrigidos++;
+        if (r.suspeito) suspeitos++;
+        return { ...l, empresa: r.nome, nomeFonte: r.fonte, nomeSuspeito: r.suspeito };
+      });
       // 3) DIVISÃO QUALIFICADA entre os donos escolhidos
-      const assigned = distributeQualified(enriquecidos, alvo);
+      const assigned = distributeQualified(comNome, alvo);
       persist([...acc, ...assigned]);
       const cont: Record<string, number> = {};
       assigned.forEach((l) => { if (l.bdr) cont[l.bdr] = (cont[l.bdr] || 0) + 1; });
       const split = Object.entries(cont).map(([b, n]) => `${b}: ${n}`).join(" · ");
-      setBanner({ ok: true, msg: `${linhas} linha(s) → ${assigned.length} empresa(s)${socDup > 0 ? ` (${socDup} sócio(s)/linha(s) unificados)` : ""} · enriquecidas no Lemit · divisão qualificada: ${split || "—"} · em REVISÃO (revise e envie ao Hub) · nicho: ${nicho} · colunas ${matched.length}/13${missing.length ? " · faltando: " + missing.join(", ") : ""}` });
+      setBanner({ ok: true, msg: `${linhas} linha(s) → ${assigned.length} empresa(s)${socDup > 0 ? ` (${socDup} sócio(s)/linha(s) unificados)` : ""} · enriquecidas no Lemit${corrigidos ? ` · ${corrigidos} nome(s) de empresa resolvido(s)` : ""}${suspeitos ? ` · ⚠ ${suspeitos} a verificar (parecem pessoa)` : ""} · divisão qualificada: ${split || "—"} · em REVISÃO · nicho: ${nicho} · colunas ${matched.length}/13${missing.length ? " · faltando: " + missing.join(", ") : ""}` });
     } catch (e: any) {
       setBanner({ ok: false, msg: "Falha ao ler/enriquecer: " + (e?.message || e) });
     }
@@ -309,7 +317,7 @@ export const ProspeccaoHub: React.FC<HubProps> = ({ teamMembers, closers = [] })
                     return (
                     <tr key={l.id} className={`border-t border-[var(--color-v4-border)] hover:bg-[var(--color-v4-card-hover)] cursor-pointer text-white ${selected.has(l.id) ? "bg-[var(--color-v4-surface)]/60" : ""}`} onClick={() => setOpenId(l.id)}>
                       <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}><Cbox checked={selected.has(l.id)} onChange={() => toggleSel(l.id)} title="Selecionar este lead" /></td>
-                      <td className="px-3 py-2.5 font-semibold"><span className="flex items-center gap-2"><Building2 size={14} className="text-[var(--color-v4-text-muted)]" />{l.empresa || "—"}</span>{(l.linhasUnificadas || 1) > 1 && <span className="text-[9px] text-[var(--color-v4-text-muted)] ml-6">{l.linhasUnificadas} linhas unificadas</span>}</td>
+                      <td className="px-3 py-2.5 font-semibold"><span className="flex items-center gap-2"><Building2 size={14} className="text-[var(--color-v4-text-muted)]" />{l.empresa || "—"}{l.nomeSuspeito && <span title="Nome parece de pessoa — verifique" className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 inline-flex items-center gap-0.5"><AlertTriangle size={9} /> verificar nome</span>}{l.nomeFonte === "site" || l.nomeFonte === "email" || l.nomeFonte === "cnpj" ? <span title={`nome resolvido via ${l.nomeFonte}`} className="text-[9px] text-[var(--color-v4-text-muted)]">via {l.nomeFonte}</span> : null}</span>{(l.linhasUnificadas || 1) > 1 && <span className="text-[9px] text-[var(--color-v4-text-muted)] ml-6">{l.linhasUnificadas} linhas unificadas</span>}</td>
                       <td className="px-3 py-2.5 text-[var(--color-v4-text-muted)] text-[11px]">{l.nicho || "—"}</td>
                       <td className="px-3 py-2.5 text-[var(--color-v4-text-muted)]">{[l.cidade, l.estado].filter(Boolean).join("/") || "—"}</td>
                       <td className="px-3 py-2.5 text-[var(--color-v4-text-muted)]">{l.decisorNome || l.socio1 || "—"}{l.decisorCargo ? <span className="text-[10px]"> · {l.decisorCargo}</span> : ""}</td>
