@@ -39,6 +39,25 @@ export interface ProspLead {
   notas: string;
   batch: string;        // rótulo do lote de upload
   createdAt: string;
+  updatedAt?: string;
+  // ---- enriquecimento (Lemit) feito já no upload da Prospecção ----
+  cnpj?: string;
+  decisorNome?: string; decisorCargo?: string; decisorTel?: string; decisorEmail?: string; decisorLinkedin?: string;
+  telefonesExtra?: TelefoneExtra[];   // telefones/WhatsApp adicionais (unificados + Lemit)
+  emailsExtra?: string[];
+  sociosExtra?: SocioExtra[];         // sócios da MESMA empresa unificados + quadro societário
+  empresaInfo?: EmpresaInfo;
+  enriquecidoEm?: string;
+  linhasUnificadas?: number;          // quantas linhas da lista viraram este card
+  enviadoHub?: boolean;               // já revisado e enviado pro Hub Outbound?
+}
+
+export interface TelefoneExtra { numero: string; tipo: string; }
+export interface SocioExtra { nome: string; cargo?: string; telefone?: string; participacao?: string; }
+export interface EmpresaInfo {
+  porte?: string; naturezaJuridica?: string; atividade?: string; cnae?: string;
+  capitalSocial?: string; dataAbertura?: string; situacao?: string;
+  funcionariosEstimado?: string; faturamentoEstimado?: string;
 }
 
 export const LEMIT_COLUNAS = [
@@ -328,4 +347,156 @@ export function downloadCSV(filename: string, csv: string): void {
   const a = document.createElement("a");
   a.href = url; a.download = filename; a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// ==================================================================
+// UNIFICAÇÃO DE SÓCIOS (mesma empresa) + ENRIQUECIMENTO (Lemit) + DIVISÃO
+// ==================================================================
+
+// chave de empresa: CNPJ (se houver) senão nome normalizado + cidade/uf
+const companyKey = (l: ProspLead) => {
+  const cnpj = onlyDigits(l.cnpj || "");
+  if (cnpj.length >= 11) return "cnpj:" + cnpj;
+  return "nome:" + norm(l.empresa) + "|" + norm(l.cidade) + norm(l.estado);
+};
+
+/**
+ * Unifica linhas da MESMA empresa num único card: mantém a linha mais completa e
+ * agrega os demais sócios (com telefone), telefones e e-mails como "extras".
+ * Não cria vários cards da mesma empresa.
+ */
+export function dedupeByCompany(leads: ProspLead[]): ProspLead[] {
+  const groups = new Map<string, ProspLead[]>();
+  for (const l of leads) { const k = companyKey(l); const g = groups.get(k); if (g) g.push(l); else groups.set(k, [l]); }
+  const out: ProspLead[] = [];
+  for (const g of groups.values()) {
+    // base = a linha com mais preenchimento (telefone/email/site)
+    const score = (l: ProspLead) => (l.whatsapp1 ? 2 : 0) + (l.whatsapp2 ? 1 : 0) + (l.email ? 1 : 0) + (l.site ? 1 : 0) + (l.socio1 ? 1 : 0);
+    const base = [...g].sort((a, b) => score(b) - score(a))[0];
+    const sociosExtra: SocioExtra[] = [];
+    const telefonesExtra: TelefoneExtra[] = [];
+    const emailsExtra: string[] = [];
+    const telsBase = new Set([base.whatsapp1, base.whatsapp2].map(onlyDigits).filter(Boolean));
+    const nomesBase = new Set([base.socio1, base.socio2].filter(Boolean));
+    const mailsBase = new Set([base.email].filter(Boolean));
+    for (const l of g) {
+      if (l === base) continue;
+      // sócios das outras linhas → viram sócios do card (com o telefone daquela linha)
+      [[l.socio1, l.whatsapp1], [l.socio2, l.whatsapp2]].forEach(([nome, tel]) => {
+        if (nome && !nomesBase.has(nome) && !sociosExtra.some((s) => s.nome === nome)) {
+          nomesBase.add(nome); sociosExtra.push({ nome, cargo: "Sócio(a)", telefone: tel || undefined });
+        }
+      });
+      // telefones extras
+      [l.whatsapp1, l.whatsapp2].filter(Boolean).forEach((t) => { const k = onlyDigits(t); if (k && !telsBase.has(k)) { telsBase.add(k); telefonesExtra.push({ numero: t, tipo: "Celular/WhatsApp" }); } });
+      // e-mails extras
+      if (l.email && !mailsBase.has(l.email)) { mailsBase.add(l.email); emailsExtra.push(l.email); }
+    }
+    out.push({ ...base, sociosExtra, telefonesExtra, emailsExtra, linhasUnificadas: g.length });
+  }
+  return out;
+}
+
+// ---- enriquecimento (Lemit) — determinístico (protótipo). Produção: API por CNPJ. ----
+const P_PORTES = ["MEI", "ME (Microempresa)", "EPP (Pequeno Porte)", "Média Empresa", "Grande Empresa"];
+const P_SIT = ["Ativa", "Ativa", "Ativa", "Ativa", "Suspensa"];
+const P_NAT = ["Sociedade Empresária Limitada (LTDA)", "Empresário Individual (EI)", "Sociedade Anônima (S.A.)", "Sociedade Limitada Unipessoal (SLU)"];
+const P_CNAE: { re: RegExp; atividade: string; cnae: string }[] = [
+  { re: /saas|tecnolog|software|tech|app/, atividade: "Desenvolvimento de software sob encomenda", cnae: "6201-5/01" },
+  { re: /energ|solar|fotovolt|renov/, atividade: "Geração/comércio de energia (solar fotovoltaica)", cnae: "3511-5/01" },
+  { re: /academ|esporte|fitness|cross|pilates|estudio|estúdio/, atividade: "Atividades de condicionamento físico", cnae: "9313-1/00" },
+  { re: /imob|incorpor|constru/, atividade: "Incorporação de empreendimentos imobiliários", cnae: "4110-7/00" },
+  { re: /saud|saúde|beleza|clinic|clínic|estetic|estétic|odont/, atividade: "Atividades de atenção à saúde / estética", cnae: "8630-5/03" },
+  { re: /varej|commerce|loja|ecom/, atividade: "Comércio varejista", cnae: "4712-1/00" },
+  { re: /b2b|servi/, atividade: "Consultoria em gestão empresarial", cnae: "7020-4/00" },
+];
+const P_NOMES = ["Ricardo", "Fernanda", "Marcelo", "Patrícia", "André", "Juliana", "Roberto", "Camila", "Eduardo", "Beatriz"];
+const P_SOBR = ["Menezes", "Tavares", "Barbosa", "Cardoso", "Moreira", "Nogueira", "Pires", "Ramos"];
+const pRng = (seed: number) => { let a = seed >>> 0; return () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; };
+const pDDD = (l: ProspLead) => { const d = onlyDigits(l.whatsapp1 || l.whatsapp2 || ""); const s = d.startsWith("55") ? d.slice(2) : d; return s.length >= 10 ? s.slice(0, 2) : "12"; };
+const pCel = (ddd: string, r: () => number) => { let n = "9"; for (let i = 0; i < 8; i++) n += Math.floor(r() * 10); return `(${ddd}) ${n.slice(0, 5)}-${n.slice(5)}`; };
+const pFixo = (ddd: string, r: () => number) => { let n = String(2 + Math.floor(r() * 3)); for (let i = 0; i < 7; i++) n += Math.floor(r() * 10); return `(${ddd}) ${n.slice(0, 4)}-${n.slice(4)}`; };
+const pCNPJ = (r: () => number) => { let s = ""; for (let i = 0; i < 14; i++) s += Math.floor(r() * 10); return `${s.slice(0, 2)}.${s.slice(2, 5)}.${s.slice(5, 8)}/${s.slice(8, 12)}-${s.slice(12)}`; };
+
+/** Enriquece 1 lead (dados cadastrais + telefones + quadro societário + decisor 100%). Mescla com os extras já unificados. */
+export function enrichProsp(lead: ProspLead): ProspLead {
+  const seed = Math.abs(hashStr(lead.empresa + (lead.cnpj || "") + lead.id + lead.cidade));
+  const r = pRng(seed);
+  const ddd = pDDD(lead);
+  const jaTel = new Set([lead.whatsapp1, lead.whatsapp2, ...(lead.telefonesExtra || []).map((t) => t.numero)].map(onlyDigits).filter(Boolean));
+  const tels: TelefoneExtra[] = [...(lead.telefonesExtra || [])];
+  const addTel = (numero: string, tipo: string) => { const k = onlyDigits(numero); if (k && !jaTel.has(k)) { jaTel.add(k); tels.push({ numero, tipo }); } };
+  addTel(pCel(ddd, r), "Celular/WhatsApp"); addTel(pFixo(ddd, r), "Fixo comercial"); if (r() > 0.5) addTel(pCel(ddd, r), "Recado (recepção)");
+  if (tels.length === 0) addTel(pCel(ddd, r), "Celular/WhatsApp");
+
+  const genNome = () => `${P_NOMES[Math.floor(r() * P_NOMES.length)]} ${P_SOBR[Math.floor(r() * P_SOBR.length)]}`;
+  const socios: SocioExtra[] = [...(lead.sociosExtra || [])];
+  const nomes = new Set([lead.socio1, lead.socio2, ...socios.map((s) => s.nome)].filter(Boolean));
+  // dá participação/cargo a quem veio da unificação sem isso
+  socios.forEach((s) => { if (!s.participacao) s.participacao = `${10 + Math.floor(r() * 60)}%`; if (!s.telefone) s.telefone = pCel(ddd, r); });
+  const nExtra = 1 + Math.floor(r() * 2);
+  for (let i = 0; i < nExtra; i++) { const nome = genNome(); if (nomes.has(nome)) continue; nomes.add(nome); socios.push({ nome, cargo: "Sócio-administrador", telefone: pCel(ddd, r), participacao: `${10 + Math.floor(r() * 60)}%` }); }
+  if (socios.length === 0) socios.push({ nome: genNome(), cargo: "Sócio-administrador", telefone: pCel(ddd, r), participacao: `${30 + Math.floor(r() * 50)}%` });
+
+  const cn = P_CNAE.find((c) => c.re.test((lead.nicho || "").toLowerCase()));
+  const ano = 1998 + Math.floor(r() * 25);
+  const empresaInfo: EmpresaInfo = {
+    porte: P_PORTES[Math.floor(r() * P_PORTES.length)], naturezaJuridica: P_NAT[Math.floor(r() * P_NAT.length)],
+    atividade: cn?.atividade || "Atividades empresariais", cnae: cn?.cnae || "8299-7/99",
+    capitalSocial: `R$ ${(10 + Math.floor(r() * 490)).toLocaleString("pt-BR")}.000,00`,
+    dataAbertura: `${String(1 + Math.floor(r() * 28)).padStart(2, "0")}/${String(1 + Math.floor(r() * 12)).padStart(2, "0")}/${ano}`,
+    situacao: P_SIT[Math.floor(r() * P_SIT.length)],
+    funcionariosEstimado: ["1–5", "6–10", "11–25", "26–50", "51–100", "100+"][Math.floor(r() * 6)],
+    faturamentoEstimado: ["até R$ 360 mil/ano", "R$ 360 mil – R$ 1 mi", "R$ 1 mi – R$ 5 mi", "R$ 5 mi – R$ 20 mi", "R$ 20 mi+"][Math.floor(r() * 5)],
+  };
+
+  const dominio = `${(lead.empresa || "empresa").toLowerCase().normalize("NFD").replace(DIACRITICS, "").replace(/[^a-z0-9]/g, "").slice(0, 16) || "empresa"}.com.br`;
+  const top = [...socios].sort((a, b) => parseInt(b.participacao || "0") - parseInt(a.participacao || "0"))[0];
+  const decisorNome = lead.decisorNome || lead.socio1 || top?.nome || genNome();
+  const firstName = (decisorNome.split(" ")[0] || "contato").toLowerCase().normalize("NFD").replace(DIACRITICS, "").replace(/[^a-z]/g, "") || "contato";
+  const decisorCargo = lead.decisorCargo || (lead.socio1 ? "Sócio(a)" : top?.cargo) || "Sócio-administrador";
+  const decisorTel = lead.decisorTel || lead.whatsapp1 || top?.telefone || tels[0]?.numero || pCel(ddd, r);
+  const decisorEmail = lead.decisorEmail || lead.email || `${firstName}@${dominio}`;
+
+  return {
+    ...lead, cnpj: lead.cnpj || pCNPJ(r), telefonesExtra: tels, sociosExtra: socios,
+    emailsExtra: lead.emailsExtra && lead.emailsExtra.length ? lead.emailsExtra : [`comercial@${dominio}`],
+    empresaInfo, decisorNome, decisorCargo, decisorTel, decisorEmail, decisorLinkedin: lead.decisorLinkedin || "",
+    enriquecidoEm: new Date().toISOString(),
+  };
+}
+
+/** Todos os telefones do lead, sem repetir (decisor + principais + extras + sócios). */
+export function allPhonesProsp(lead: ProspLead): { numero: string; tipo: string }[] {
+  const out: { numero: string; tipo: string }[] = []; const seen = new Set<string>();
+  const push = (numero: string | undefined, tipo: string) => { if (!numero) return; const k = onlyDigits(numero); if (!seen.has(k)) { seen.add(k); out.push({ numero, tipo }); } };
+  push(lead.decisorTel, "Decisor"); push(lead.whatsapp1, "WhatsApp 1"); push(lead.whatsapp2, "WhatsApp 2");
+  (lead.telefonesExtra || []).forEach((t) => push(t.numero, t.tipo));
+  (lead.sociosExtra || []).forEach((s) => push(s.telefone, `Sócio: ${s.nome.split(" ")[0]}`));
+  return out;
+}
+
+/** Divisão QUALIFICADA: ordena por maturidade e distribui round-robin, pra cada dono receber um mix equilibrado de bons/ruins. */
+export function distributeQualified(leads: ProspLead[], owners: string[]): ProspLead[] {
+  if (!owners.length) return leads;
+  const ordenados = [...leads].sort((a, b) => (b.maturidade || 0) - (a.maturidade || 0));
+  const byId = new Map<string, string>();
+  ordenados.forEach((l, i) => byId.set(l.id, owners[i % owners.length]));
+  return leads.map((l) => ({ ...l, bdr: byId.get(l.id) || l.bdr }));
+}
+
+export type ReqCampo = "empresa" | "telefone" | "email" | "socio";
+/**
+ * Incompleto = campo em branco NA LISTA ORIGINAL (não conta o que o Lemit
+ * fabricou no enriquecimento). Assim a limpeza remove empresas cujos DADOS DE
+ * ORIGEM vieram vazios, que é o que o usuário quer avaliar.
+ */
+export function isIncompleto(lead: ProspLead, reqs: ReqCampo[]): boolean {
+  return reqs.some((rq) => {
+    if (rq === "empresa") return !lead.empresa?.trim();
+    if (rq === "telefone") return !lead.whatsapp1?.trim() && !lead.whatsapp2?.trim();
+    if (rq === "email") return !lead.email?.trim();
+    if (rq === "socio") return !lead.socio1?.trim() && !lead.socio2?.trim();
+    return false;
+  });
 }

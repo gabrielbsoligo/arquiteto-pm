@@ -2,11 +2,13 @@ import React, { useMemo, useRef, useState, useEffect } from "react";
 import {
   Upload, Download, Phone, MessageCircle, Star, Globe, Instagram, Facebook, Linkedin, Youtube,
   MapPin, Search, Sparkles, X, Building2, Copy, Check, ClipboardList, Users, Trash2, Calendar, Clock,
+  Database, Users2, UserCheck, Send, Briefcase, Filter, AlertTriangle,
 } from "lucide-react";
 import { useAppStore } from "../../store";
 import {
   parseFile, loadLeads, saveLeads, channelLink, telLink, callLink, whatsappLink,
-  generateApproach, toCSV, downloadCSV, STATUS_LABELS, STATUS_ORDER, NICHOS, maturidadeMotivo, type ProspLead,
+  generateApproach, toCSV, downloadCSV, dedupeByCompany, enrichProsp, distributeQualified, isIncompleto, allPhonesProsp,
+  STATUS_LABELS, STATUS_ORDER, NICHOS, maturidadeMotivo, type ProspLead, type ReqCampo,
 } from "./prospeccao/prospLib";
 
 /**
@@ -50,6 +52,9 @@ export const ProspeccaoHub: React.FC<HubProps> = ({ teamMembers, closers = [] })
   const [pending, setPending] = useState<File[] | null>(null); // arquivo(s) escolhido(s), aguardando definir BDR
   const [preview, setPreview] = useState<{ count: number; matched: number; missing: string[] } | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [limpezaOpen, setLimpezaOpen] = useState(false);
+  const [reqs, setReqs] = useState<ReqCampo[]>(["empresa", "telefone"]);
+  const [sendOpen, setSendOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const persist = (next: ProspLead[]) => { setLeads(next); saveLeads(next); };
@@ -69,32 +74,41 @@ export const ProspeccaoHub: React.FC<HubProps> = ({ teamMembers, closers = [] })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [teamNames.join(",")]);
 
-  // owners = [] → distribui entre todo o time; 1 nome → tudo pra ele; vários → divide igualmente
+  // Upload: unifica sócios da mesma empresa → enriquece no Lemit → divisão
+  // qualificada entre os donos → fica "em revisão" (não vai pro Hub até aprovar).
   const handleFiles = async (files: File[] | null, owners: string[], nicho: string) => {
     if (!files?.length) return;
-    setOwnersSel(owners); setNichoSel(nicho); // lembra a última escolha
-    const alvo = owners.length ? owners : teamNames; // entre quem dividir
+    setOwnersSel(owners); setNichoSel(nicho);
+    const alvo = owners.length ? owners : teamNames;
     try {
       let matched: string[] = []; let missing: string[] = [];
-      let acc = [...leads];
-      let fresh: ProspLead[] = [];
+      const acc = [...leads];
+      let rawFresh: ProspLead[] = [];
+      let linhas = 0;
       for (const f of files) {
         const batch = f.name.replace(/\.(csv|xlsx?|xls)$/i, "");
         const res = await parseFile(f, batch, nicho, null);
         matched = res.matched; missing = res.missing;
-        const existingIds = new Set([...acc, ...fresh].map((l) => l.id));
-        fresh = [...fresh, ...res.leads.filter((l) => !existingIds.has(l.id))];
+        linhas += res.leads.length;
+        rawFresh = [...rawFresh, ...res.leads];
       }
-      // distribui os novos igualmente (round-robin) entre os donos escolhidos
-      const assigned = alvo.length ? fresh.map((l, i) => ({ ...l, bdr: alvo[i % alvo.length] })) : fresh;
+      // 1) UNIFICA sócios da mesma empresa (1 card por empresa)
+      const unificados = dedupeByCompany(rawFresh);
+      const socDup = linhas - unificados.length;
+      // tira empresas já existentes (por id) pra não duplicar
+      const existingIds = new Set(acc.map((l) => l.id));
+      const novos = unificados.filter((l) => !existingIds.has(l.id));
+      // 2) ENRIQUECE no Lemit (dados cadastrais + telefones + quadro societário + decisor)
+      const enriquecidos = novos.map((l) => ({ ...enrichProsp(l), enviadoHub: false, updatedAt: new Date().toISOString() }));
+      // 3) DIVISÃO QUALIFICADA entre os donos escolhidos
+      const assigned = distributeQualified(enriquecidos, alvo);
       persist([...acc, ...assigned]);
-      // resumo do split por dono
       const cont: Record<string, number> = {};
       assigned.forEach((l) => { if (l.bdr) cont[l.bdr] = (cont[l.bdr] || 0) + 1; });
       const split = Object.entries(cont).map(([b, n]) => `${b}: ${n}`).join(" · ");
-      setBanner({ ok: true, msg: `${assigned.length} lead(s) importado(s) · ${owners.length > 1 ? "dividido entre" : "dono"} ${owners.length ? "" : "(todos) "}${split || "—"} · nicho: ${nicho} · colunas ${matched.length}/13${missing.length ? " · faltando: " + missing.join(", ") : ""}` });
+      setBanner({ ok: true, msg: `${linhas} linha(s) → ${assigned.length} empresa(s)${socDup > 0 ? ` (${socDup} sócio(s)/linha(s) unificados)` : ""} · enriquecidas no Lemit · divisão qualificada: ${split || "—"} · em REVISÃO (revise e envie ao Hub) · nicho: ${nicho} · colunas ${matched.length}/13${missing.length ? " · faltando: " + missing.join(", ") : ""}` });
     } catch (e: any) {
-      setBanner({ ok: false, msg: "Falha ao ler o arquivo: " + (e?.message || e) });
+      setBanner({ ok: false, msg: "Falha ao ler/enriquecer: " + (e?.message || e) });
     }
   };
 
@@ -145,6 +159,32 @@ export const ProspeccaoHub: React.FC<HubProps> = ({ teamMembers, closers = [] })
   };
   const clearAll = () => { if (confirm("Apagar TODAS as listas deste navegador?")) persist([]); };
 
+  // ---- revisão: contagens, limpeza de incompletos e envio ao Hub ----
+  const emRevisao = useMemo(() => leads.filter((l) => !l.enviadoHub), [leads]);
+  const enviadosCount = leads.length - emRevisao.length;
+  const incompletos = useMemo(() => leads.filter((l) => isIncompleto(l, reqs)), [leads, reqs]);
+  const toggleReq = (rq: ReqCampo) => setReqs((r) => (r.includes(rq) ? r.filter((x) => x !== rq) : [...r, rq]));
+  const removerIncompletos = () => {
+    if (!incompletos.length) { setBanner({ ok: true, msg: "Nenhum lead incompleto pelos critérios atuais." }); return; }
+    if (confirm(`Remover ${incompletos.length} empresa(s) incompleta(s) (faltando: ${reqs.join(", ")})?`)) {
+      const ids = new Set(incompletos.map((l) => l.id));
+      persist(leads.filter((l) => !ids.has(l.id))); setLimpezaOpen(false);
+      setBanner({ ok: true, msg: `${ids.size} empresa(s) incompleta(s) removida(s).` });
+    }
+  };
+  const enviarAoHub = (owners: string[]) => {
+    const alvo = owners.length ? owners : teamNames;
+    const pendentes = leads.filter((l) => !l.enviadoHub);
+    if (!pendentes.length) { setBanner({ ok: false, msg: "Nada em revisão pra enviar." }); return; }
+    const redistribuidos = distributeQualified(pendentes, alvo);
+    const byId = new Map(redistribuidos.map((l) => [l.id, l]));
+    persist(leads.map((l) => { const r = byId.get(l.id); return r ? { ...r, enviadoHub: true, updatedAt: new Date().toISOString() } : l; }));
+    setSendOpen(false);
+    const cont: Record<string, number> = {};
+    redistribuidos.forEach((l) => { if (l.bdr) cont[l.bdr] = (cont[l.bdr] || 0) + 1; });
+    setBanner({ ok: true, msg: `${pendentes.length} empresa(s) enviada(s) ao Hub Outbound · divisão qualificada: ${Object.entries(cont).map(([b, n]) => `${b}: ${n}`).join(" · ")}` });
+  };
+
   // simulação local: só atualiza o Hub (localStorage). O funil e a agenda abaixo refletem na hora.
   const changeStatus = (lead: ProspLead, status: ProspLead["status"]) => {
     if (status === "agendado") { setAgendarFor(lead); return; }
@@ -175,11 +215,21 @@ export const ProspeccaoHub: React.FC<HubProps> = ({ teamMembers, closers = [] })
         <button onClick={() => fileRef.current?.click()} className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-white text-sm font-semibold" style={{ background: RED }}>
           <Upload size={15} /> Subir lista
         </button>
+        {leads.length > 0 && (
+          <button onClick={() => setLimpezaOpen(true)} title="Remover empresas com campos em branco" className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-[var(--color-v4-border)] text-sm font-semibold text-white hover:bg-[var(--color-v4-card-hover)]">
+            <Filter size={15} /> Limpeza{incompletos.length ? ` (${incompletos.length})` : ""}
+          </button>
+        )}
+        {emRevisao.length > 0 && (
+          <button onClick={() => setSendOpen(true)} className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-white text-sm font-bold" style={{ background: RED }}>
+            <Send size={15} /> Enviar ao Hub ({emRevisao.length})
+          </button>
+        )}
         <button onClick={exportCSV} className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-[var(--color-v4-border)] text-sm font-semibold text-white hover:bg-[var(--color-v4-card-hover)]">
           <Download size={15} /> Exportar
         </button>
         {leads.length > 0 && (
-          <button onClick={clearAll} title="Remover todos" className="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-lg border border-[var(--color-v4-border)] text-[var(--color-v4-text-muted)] hover:text-[var(--color-v4-red)] text-sm"><Trash2 size={15} /> Remover todos</button>
+          <button onClick={clearAll} title="Remover todos" className="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-lg border border-[var(--color-v4-border)] text-[var(--color-v4-text-muted)] hover:text-[var(--color-v4-red)] text-sm"><Trash2 size={15} /></button>
         )}
       </div>
 
@@ -204,6 +254,13 @@ export const ProspeccaoHub: React.FC<HubProps> = ({ teamMembers, closers = [] })
                 <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar empresa, cidade, sócio…"
                   className="pl-8 pr-3 py-2 rounded-lg border border-[var(--color-v4-border)] bg-[var(--color-v4-surface)] text-white text-sm w-64 focus:outline-none focus:ring-2 focus:ring-red-500/30" />
               </div>
+            </div>
+
+            {/* status de revisão */}
+            <div className="flex flex-wrap items-center gap-3 mb-4 text-[12px]">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/30"><ClipboardList size={13} /> Em revisão: <b>{emRevisao.length}</b></span>
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/30"><Check size={13} /> Enviados ao Hub: <b>{enviadosCount}</b></span>
+              <span className="text-[var(--color-v4-text-muted)]">Suba a lista → unifica sócios + enriquece no Lemit → revise/limpe → <b className="text-white">Enviar ao Hub</b> (divisão qualificada).</span>
             </div>
 
             {/* FUNIL LOCAL (simulação) — reflete os status na hora */}
@@ -232,30 +289,43 @@ export const ProspeccaoHub: React.FC<HubProps> = ({ teamMembers, closers = [] })
             )}
 
             <div className={`overflow-x-auto ${card}`}>
-              <table className="w-full text-sm min-w-[920px]">
+              <table className="w-full text-sm min-w-[1120px]">
                 <thead className="bg-[var(--color-v4-surface)] text-[var(--color-v4-text-muted)] text-left text-[11px] uppercase tracking-wide">
                   <tr>
                     <th className="px-3 py-2.5 w-8"><Cbox checked={allVisibleSelected} onChange={toggleAllVisible} title="Selecionar / limpar todos" /></th>
                     <th className="px-3 py-2.5">Empresa</th><th className="px-3 py-2.5">Nicho</th><th className="px-3 py-2.5">Cidade/UF</th>
-                    <th className="px-3 py-2.5">Contato</th><th className="px-3 py-2.5">Dono</th><th className="px-3 py-2.5">Presença</th>
-                    <th className="px-3 py-2.5">Status</th><th className="px-3 py-2.5"></th>
+                    <th className="px-3 py-2.5">Decisor</th><th className="px-3 py-2.5">Dados</th><th className="px-3 py-2.5">Dono</th><th className="px-3 py-2.5">Presença</th>
+                    <th className="px-3 py-2.5">Envio</th><th className="px-3 py-2.5"></th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((l) => (
+                  {filtered.map((l) => {
+                    const nSoc = 1 + (l.sociosExtra?.length || 0);
+                    const nTel = allPhonesProsp(l).length;
+                    return (
                     <tr key={l.id} className={`border-t border-[var(--color-v4-border)] hover:bg-[var(--color-v4-card-hover)] cursor-pointer text-white ${selected.has(l.id) ? "bg-[var(--color-v4-surface)]/60" : ""}`} onClick={() => setOpenId(l.id)}>
                       <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}><Cbox checked={selected.has(l.id)} onChange={() => toggleSel(l.id)} title="Selecionar este lead" /></td>
-                      <td className="px-3 py-2.5 font-semibold flex items-center gap-2"><Building2 size={14} className="text-[var(--color-v4-text-muted)]" />{l.empresa || "—"}</td>
+                      <td className="px-3 py-2.5 font-semibold"><span className="flex items-center gap-2"><Building2 size={14} className="text-[var(--color-v4-text-muted)]" />{l.empresa || "—"}</span>{(l.linhasUnificadas || 1) > 1 && <span className="text-[9px] text-[var(--color-v4-text-muted)] ml-6">{l.linhasUnificadas} linhas unificadas</span>}</td>
                       <td className="px-3 py-2.5 text-[var(--color-v4-text-muted)] text-[11px]">{l.nicho || "—"}</td>
                       <td className="px-3 py-2.5 text-[var(--color-v4-text-muted)]">{[l.cidade, l.estado].filter(Boolean).join("/") || "—"}</td>
-                      <td className="px-3 py-2.5 text-[var(--color-v4-text-muted)]">{l.whatsapp1 || l.email || "—"}</td>
+                      <td className="px-3 py-2.5 text-[var(--color-v4-text-muted)]">{l.decisorNome || l.socio1 || "—"}{l.decisorCargo ? <span className="text-[10px]"> · {l.decisorCargo}</span> : ""}</td>
+                      <td className="px-3 py-2.5 text-[11px] text-[var(--color-v4-text-muted)]">
+                        <span className="inline-flex items-center gap-2">
+                          <span className="inline-flex items-center gap-0.5"><Users2 size={11} />{nSoc}</span>
+                          <span className="inline-flex items-center gap-0.5"><Phone size={11} />{nTel}</span>
+                          {l.enriquecidoEm && <span className="inline-flex items-center gap-0.5" style={{ color: RED }}><Database size={11} />Lemit</span>}
+                        </span>
+                      </td>
                       <td className="px-3 py-2.5"><span className="text-[11px] px-2 py-0.5 rounded-full bg-[var(--color-v4-surface)] border border-[var(--color-v4-border)]">{l.bdr || "—"}</span></td>
                       <td className="px-3 py-2.5"><Stars value={l.maturidade} readOnly /></td>
-                      <td className="px-3 py-2.5"><StatusPill status={l.status} /></td>
+                      <td className="px-3 py-2.5">{l.enviadoHub
+                        ? <span className="text-[10.5px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400">Enviado</span>
+                        : <span className="text-[10.5px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400">Em revisão</span>}</td>
                       <td className="px-3 py-2.5 text-right"><span className="text-[11px] font-semibold" style={{ color: RED }}>Abrir →</span></td>
                     </tr>
-                  ))}
-                  {filtered.length === 0 && <tr><td colSpan={9} className="px-3 py-8 text-center text-[var(--color-v4-text-muted)]">Nenhum lead nesse filtro.</td></tr>}
+                    );
+                  })}
+                  {filtered.length === 0 && <tr><td colSpan={10} className="px-3 py-8 text-center text-[var(--color-v4-text-muted)]">Nenhum lead nesse filtro.</td></tr>}
                 </tbody>
               </table>
             </div>
@@ -292,6 +362,77 @@ export const ProspeccaoHub: React.FC<HubProps> = ({ teamMembers, closers = [] })
       {agendarFor && <AgendarModal lead={agendarFor} closers={closers} onClose={() => setAgendarFor(null)} onConfirm={confirmAgendar} />}
       {pending && <BdrModal team={teamNames} preview={preview} fileName={pending[0]?.name || ""} nFiles={pending.length} defOwners={ownersSel} defNicho={nichoSel}
         onCancel={() => { setPending(null); setPreview(null); }} onConfirm={confirmImport} />}
+      {limpezaOpen && <LimpezaModal reqs={reqs} toggleReq={toggleReq} incompletos={incompletos} total={leads.length} onClose={() => setLimpezaOpen(false)} onConfirm={removerIncompletos} />}
+      {sendOpen && <SendHubModal team={teamNames} leads={emRevisao} defOwners={ownersSel.length ? ownersSel : teamNames} onClose={() => setSendOpen(false)} onConfirm={enviarAoHub} />}
+    </div>
+  );
+};
+
+// ---------------- Modal Limpeza: remover empresas com campos em branco ----------------
+const REQ_LABELS: Record<ReqCampo, string> = { empresa: "Sem nome da empresa", telefone: "Sem telefone", email: "Sem e-mail", socio: "Sem sócio/decisor" };
+const LimpezaModal: React.FC<{ reqs: ReqCampo[]; toggleReq: (r: ReqCampo) => void; incompletos: ProspLead[]; total: number; onClose: () => void; onConfirm: () => void }> = ({ reqs, toggleReq, incompletos, total, onClose, onConfirm }) => (
+  <div className="fixed inset-0 z-[60] flex items-center justify-center">
+    <div className="absolute inset-0 bg-black/60" onClick={onClose} />
+    <div className={`relative w-full max-w-md ${card} p-5`}>
+      <div className="flex items-center gap-2 mb-3"><Filter size={16} style={{ color: RED }} /><h3 className="text-sm font-bold text-white">Limpeza — remover incompletos</h3><div className="flex-1" /><button onClick={onClose} className="text-[var(--color-v4-text-muted)] hover:text-white"><X size={18} /></button></div>
+      <p className="text-[11px] text-[var(--color-v4-text-muted)] mb-3">Marque quais campos são obrigatórios. Empresas com <b>qualquer</b> um em branco serão removidas.</p>
+      <div className="space-y-1.5">
+        {(Object.keys(REQ_LABELS) as ReqCampo[]).map((rq) => {
+          const on = reqs.includes(rq);
+          return (
+            <button key={rq} onClick={() => toggleReq(rq)} className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg border text-sm text-left ${on ? "text-white border-transparent" : "text-[var(--color-v4-text-muted)] border-[var(--color-v4-border)] hover:bg-[var(--color-v4-surface)]"}`} style={on ? { background: RED } : undefined}>
+              <span className={`w-4 h-4 shrink-0 rounded flex items-center justify-center border-2 ${on ? "border-white/70" : "border-[var(--color-v4-text-muted)]"}`}>{on && <Check size={11} className="text-white" strokeWidth={3} />}</span>
+              {REQ_LABELS[rq]}
+            </button>
+          );
+        })}
+      </div>
+      <p className="text-[12px] mt-3 flex items-center gap-1.5" style={{ color: incompletos.length ? "#ef4444" : "var(--color-v4-text-muted)" }}>
+        <AlertTriangle size={13} /> {incompletos.length} de {total} empresa(s) serão removidas.
+      </p>
+      <div className="flex gap-2 mt-4">
+        <button onClick={onClose} className="py-2 px-3 rounded-lg border border-[var(--color-v4-border)] text-[var(--color-v4-text-muted)] text-sm">Cancelar</button>
+        <button disabled={!incompletos.length || !reqs.length} onClick={onConfirm} className="flex-1 inline-flex items-center justify-center gap-2 py-2 rounded-lg text-white text-sm font-bold disabled:opacity-30 bg-red-600"><Trash2 size={14} /> Remover {incompletos.length || ""} incompleto(s)</button>
+      </div>
+    </div>
+  </div>
+);
+
+// ---------------- Modal Enviar ao Hub: divisão qualificada ----------------
+const SendHubModal: React.FC<{ team: string[]; leads: ProspLead[]; defOwners: string[]; onClose: () => void; onConfirm: (owners: string[]) => void }> = ({ team, leads, defOwners, onClose, onConfirm }) => {
+  const [owners, setOwners] = useState<string[]>(defOwners);
+  const toggle = (n: string) => setOwners((o) => (o.includes(n) ? o.filter((x) => x !== n) : [...o, n]));
+  const alvo = owners.length ? owners : team;
+  const total = leads.length;
+  const base = Math.floor(total / (alvo.length || 1)); const resto = total % (alvo.length || 1);
+  // preview qualificado: mostra quantos de cada faixa de maturidade cada dono recebe (aprox.)
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
+      <div className={`relative w-full max-w-md ${card} p-5`}>
+        <div className="flex items-center gap-2 mb-3"><Send size={16} style={{ color: RED }} /><h3 className="text-sm font-bold text-white">Enviar {total} empresa(s) ao Hub Outbound</h3><div className="flex-1" /><button onClick={onClose} className="text-[var(--color-v4-text-muted)] hover:text-white"><X size={18} /></button></div>
+        <p className="text-[11px] text-[var(--color-v4-text-muted)] mb-3">Divisão <b className="text-white">qualificada</b>: ordena por presença digital e distribui alternado, pra cada dono receber um mix equilibrado de leads bons e fracos.</p>
+        <div className="flex items-center justify-between">
+          <label className="text-[11px] text-[var(--color-v4-text-muted)] uppercase font-semibold">Donos</label>
+          <button onClick={() => setOwners(owners.length === team.length ? [] : [...team])} className="text-[10.5px] underline text-[var(--color-v4-text-muted)] hover:text-white">{owners.length === team.length ? "limpar" : "todos"}</button>
+        </div>
+        <div className="grid grid-cols-2 gap-1.5 mt-1.5">
+          {team.map((n) => {
+            const on = owners.includes(n);
+            return (
+              <button key={n} onClick={() => toggle(n)} className={`flex items-center gap-2 px-2.5 py-2 rounded-lg border text-sm text-left ${on ? "text-white border-transparent" : "text-[var(--color-v4-text-muted)] border-[var(--color-v4-border)] hover:bg-[var(--color-v4-surface)]"}`} style={on ? { background: RED } : undefined}>
+                <span className={`w-4 h-4 shrink-0 rounded flex items-center justify-center border-2 ${on ? "border-white/70" : "border-[var(--color-v4-text-muted)]"}`}>{on && <Check size={11} className="text-white" strokeWidth={3} />}</span>
+                {n}
+              </button>
+            );
+          })}
+        </div>
+        <p className="text-[11px] mt-2" style={{ color: RED }}>{alvo.length ? `~${base}${resto ? `–${base + 1}` : ""} empresa(s) por dono (${alvo.join(", ")})` : "escolha ao menos 1 dono"}</p>
+        <div className="flex gap-2 mt-4">
+          <button onClick={onClose} className="py-2 px-3 rounded-lg border border-[var(--color-v4-border)] text-[var(--color-v4-text-muted)] text-sm">Cancelar</button>
+          <button onClick={() => onConfirm(owners)} className="flex-1 inline-flex items-center justify-center gap-2 py-2 rounded-lg text-white text-sm font-bold" style={{ background: RED }}><Send size={14} /> Enviar ao Hub</button>
+        </div>
+      </div>
     </div>
   );
 };
@@ -497,20 +638,48 @@ const LeadPanel: React.FC<{ lead: ProspLead; closers: Member[]; onClose: () => v
             )}
           </div>
 
-          {/* click-to-call */}
+          {/* ENRIQUECIMENTO (Lemit) — dados da empresa + sócios unificados */}
+          {lead.enriquecidoEm && (
+            <div className={`${card} p-4`}>
+              <p className="text-sm font-bold text-white flex items-center gap-1.5 mb-2"><Database size={15} style={{ color: RED }} /> Enriquecimento <span className="text-[11px] font-normal text-[var(--color-v4-text-muted)]">· Lemit</span>{(lead.linhasUnificadas || 1) > 1 && <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--color-v4-surface)] text-[var(--color-v4-text-muted)]">{lead.linhasUnificadas} linhas unificadas</span>}</p>
+              <div className="grid grid-cols-2 gap-x-3 gap-y-1 mb-2">
+                {([["CNPJ", lead.cnpj], ["Porte", lead.empresaInfo?.porte], ["Situação", lead.empresaInfo?.situacao], ["Atividade", lead.empresaInfo?.atividade ? `${lead.empresaInfo.atividade}${lead.empresaInfo.cnae ? ` (${lead.empresaInfo.cnae})` : ""}` : ""], ["Capital", lead.empresaInfo?.capitalSocial], ["Abertura", lead.empresaInfo?.dataAbertura], ["Funcionários", lead.empresaInfo?.funcionariosEstimado], ["Faturamento", lead.empresaInfo?.faturamentoEstimado]] as [string, string | undefined][]).filter(([, v]) => v).map(([k, v]) => (
+                  <div key={k} className="text-[12px]"><span className="text-[var(--color-v4-text-muted)]">{k}: </span><span className="text-white">{v}</span></div>
+                ))}
+              </div>
+              {(lead.sociosExtra?.length || 0) > 0 && (
+                <div>
+                  <p className="text-[10px] font-semibold text-[var(--color-v4-text-muted)] uppercase mb-1 flex items-center gap-1"><Users2 size={11} /> Sócios / quadro societário</p>
+                  <div className="space-y-1">
+                    {lead.sociosExtra!.map((s, i) => (
+                      <div key={i} className="flex items-center gap-2 text-[12px] px-2.5 py-1.5 rounded-lg bg-[var(--color-v4-surface)] border border-[var(--color-v4-border)]">
+                        <UserCheck size={12} className="text-[var(--color-v4-text-muted)]" /><span className="text-white font-medium">{s.nome}</span>
+                        {s.cargo && <span className="text-[var(--color-v4-text-muted)] text-[10.5px]">{s.cargo}</span>}
+                        {s.participacao && <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--color-v4-card)] text-[var(--color-v4-text-muted)]">{s.participacao}</span>}
+                        {s.telefone && <a href={telLink(s.telefone)} className="ml-auto inline-flex items-center gap-1 text-[11px] font-semibold" style={{ color: RED }}><Phone size={11} />{s.telefone}</a>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <p className="text-[10px] text-[var(--color-v4-text-muted)] mt-2 opacity-70">Enriquecido em {new Date(lead.enriquecidoEm).toLocaleString("pt-BR")} · protótipo (dados simulados). Produção: API do Lemit por CNPJ.</p>
+            </div>
+          )}
+
+          {/* click-to-call — TODOS os telefones (decisor + principais + extras + sócios) */}
           <div>
-            <p className="text-[11px] font-semibold text-[var(--color-v4-text-muted)] uppercase mb-1.5">Contato — click-to-call</p>
-            <div className="flex flex-wrap gap-2">
-              {[lead.whatsapp1, lead.whatsapp2].filter(Boolean).map((ph, i) => (
-                <div key={i} className="inline-flex items-center rounded-lg border border-[var(--color-v4-border)] overflow-hidden">
-                  <a href={telLink(ph)} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-semibold text-white" style={{ background: RED }}><Phone size={13} /> {ph}</a>
-                  <a href={callLink(ph)} title="Discar via API4COM (requer app 4COM)" className="px-2 py-1.5 text-[10px] text-[var(--color-v4-text-muted)] hover:text-white border-l border-[var(--color-v4-border)]">4COM</a>
-                  <a href={whatsappLink(ph)} target="_blank" rel="noopener" className="inline-flex items-center gap-1 px-2.5 py-1.5 text-sm text-green-400 hover:bg-[var(--color-v4-surface)] border-l border-[var(--color-v4-border)]"><MessageCircle size={14} /></a>
+            <p className="text-[11px] font-semibold text-[var(--color-v4-text-muted)] uppercase mb-1.5 flex items-center gap-1.5"><Phone size={12} /> Telefones — click-to-call <span className="normal-case font-normal text-[10px]">({allPhonesProsp(lead).length})</span></p>
+            <div className="flex flex-col gap-2">
+              {allPhonesProsp(lead).map((ph, i) => (
+                <div key={i} className="inline-flex items-center rounded-lg border border-[var(--color-v4-border)] overflow-hidden w-fit">
+                  <span className="text-[9px] uppercase tracking-wide text-[var(--color-v4-text-muted)] px-2 py-1.5 border-r border-[var(--color-v4-border)] bg-[var(--color-v4-surface)] min-w-[92px]">{ph.tipo}</span>
+                  <a href={telLink(ph.numero)} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-semibold text-white" style={{ background: RED }}><Phone size={13} /> {ph.numero}</a>
+                  <a href={callLink(ph.numero)} title="Discar via API4COM (requer app 4COM)" className="px-2 py-1.5 text-[10px] text-[var(--color-v4-text-muted)] hover:text-white border-l border-[var(--color-v4-border)]">4COM</a>
+                  <a href={whatsappLink(ph.numero)} target="_blank" rel="noopener" className="inline-flex items-center gap-1 px-2.5 py-1.5 text-sm text-green-400 hover:bg-[var(--color-v4-surface)] border-l border-[var(--color-v4-border)]"><MessageCircle size={14} /></a>
                 </div>
               ))}
-              {!lead.whatsapp1 && !lead.whatsapp2 && <span className="text-sm text-[var(--color-v4-text-muted)]">Sem telefone na lista.</span>}
+              {allPhonesProsp(lead).length === 0 && <span className="text-sm text-[var(--color-v4-text-muted)]">Sem telefone.</span>}
             </div>
-            <p className="text-[10px] text-[var(--color-v4-text-muted)] mt-1">Botão vermelho abre o discador/softphone (tel:). Auto-discagem nativa do API4COM exige o HTTP API + token deles (produção).</p>
           </div>
 
           {/* links */}

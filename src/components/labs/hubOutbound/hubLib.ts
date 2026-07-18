@@ -475,6 +475,7 @@ export function loadLeads(): ProspLead[] {
     let changed = false;
     for (const p of readRaw(PROSP_KEY)) {
       if (!p || !p.id || dismissed.has(p.id)) continue;
+      if (p.enviadoHub !== true) continue;                 // só recebe o que foi revisado + enviado na Prospecção
       if (!hubById.has(p.id)) { hubById.set(p.id, p); changed = true; } // novo lead vindo da Prospecção
     }
     const merged = Array.from(hubById.values()).map(normalizeLead);
