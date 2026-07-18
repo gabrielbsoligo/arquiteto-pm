@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from "react";
+import React, { useMemo, useRef, useState, useEffect } from "react";
 import {
   Upload, Download, Phone, MessageCircle, Star, Globe, Instagram, Facebook, Linkedin, Youtube,
   MapPin, Search, Sparkles, X, Building2, Copy, Check, ClipboardList, Users, Trash2, Calendar, Clock,
@@ -51,6 +51,20 @@ export const ProspeccaoHub: React.FC<HubProps> = ({ teamMembers, closers = [] })
 
   const persist = (next: ProspLead[]) => { setLeads(next); saveLeads(next); };
   const updateLead = (id: string, patch: Partial<ProspLead>) => { const next = leads.map((l) => (l.id === id ? { ...l, ...patch } : l)); persist(next); return next.find((l) => l.id === id)!; };
+
+  // auto-conserto: leads salvos com dono fora do time real (ex.: placeholders antigos
+  // Ana/Bruno/Carla) são redistribuídos entre o time atual.
+  useEffect(() => {
+    if (!leads.length || !teamNames.length) return;
+    const set = new Set(teamNames);
+    const orphans = leads.filter((l) => !l.bdr || !set.has(l.bdr));
+    if (!orphans.length) return;
+    let i = 0;
+    const next = leads.map((l) => (l.bdr && set.has(l.bdr) ? l : { ...l, bdr: teamNames[i++ % teamNames.length] }));
+    persist(next);
+    setBanner({ ok: true, msg: `Corrigi ${orphans.length} lead(s) com dono antigo/placeholder → redistribuídos entre ${teamNames.join(", ")}.` });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [teamNames.join(",")]);
 
   const handleFiles = async (files: FileList | null) => {
     if (!files?.length) return;
