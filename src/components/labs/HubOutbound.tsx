@@ -1,4 +1,5 @@
 import React, { useMemo, useState, useEffect } from "react";
+import * as XLSX from "xlsx";
 import { DragDropContext, Droppable, Draggable, type DropResult } from "@hello-pangea/dnd";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, CartesianGrid,
@@ -64,6 +65,7 @@ export const HubOutbound: React.FC<HubProps> = ({ teamMembers, closers = [] }) =
   const [nichoFilter, setNichoFilter] = useState<string>("todos");
   const [matFilter, setMatFilter] = useState<Nivel | "todos">("todos");
   const [porteFilter, setPorteFilter] = useState<string[]>([]); // vazio = todos os portes (múltipla escolha)
+  const [origemFilter, setOrigemFilter] = useState<string>("todos");
   const [periodoPreset, setPeriodoPreset] = useState<"tudo" | "hoje" | "7d" | "30d" | "custom">("tudo");
   const [periodoBase, setPeriodoBase] = useState<"createdAt" | "updatedAt">("createdAt");
   const [dtDe, setDtDe] = useState(""); const [dtAte, setDtAte] = useState("");
@@ -104,6 +106,7 @@ export const HubOutbound: React.FC<HubProps> = ({ teamMembers, closers = [] }) =
     const set = new Set(leads.map((l) => l.empresaInfo?.porte).filter(Boolean) as string[]);
     return Array.from(set).sort((a, b) => (ordem.indexOf(a) - ordem.indexOf(b)));
   }, [leads]);
+  const origensDisponiveis = useMemo(() => Array.from(new Set(leads.map((l) => l.origem).filter(Boolean) as string[])).sort(), [leads]);
   const periodRange = useMemo<[number, number]>(() => {
     const now = Date.now();
     if (periodoPreset === "hoje") { const d = new Date(); d.setHours(0, 0, 0, 0); return [d.getTime(), Infinity]; }
@@ -116,7 +119,7 @@ export const HubOutbound: React.FC<HubProps> = ({ teamMembers, closers = [] }) =
     }
     return [-Infinity, Infinity];
   }, [periodoPreset, dtDe, dtAte]);
-  const filtrosAtivos = nichoFilter !== "todos" || matFilter !== "todos" || porteFilter.length > 0 || periodoPreset !== "tudo" || !!statusFilter;
+  const filtrosAtivos = nichoFilter !== "todos" || matFilter !== "todos" || porteFilter.length > 0 || origemFilter !== "todos" || periodoPreset !== "tudo" || !!statusFilter;
 
   const bdrLeads = useMemo(() => leads.filter((l) => bdrFilter === "todos" || l.bdr === bdrFilter), [leads, bdrFilter]);
   // filtro comum (aplica em Kanban, Tabela e Gestão): busca + nicho + maturidade + período
@@ -127,18 +130,19 @@ export const HubOutbound: React.FC<HubProps> = ({ teamMembers, closers = [] }) =
       if (nichoFilter !== "todos" && (l.nicho || "") !== nichoFilter) return false;
       if (matFilter !== "todos" && (l.maturidadeNivel || maturidadeBanda(l.maturidade)) !== matFilter) return false;
       if (porteFilter.length && !porteFilter.includes(l.empresaInfo?.porte || "")) return false;
+      if (origemFilter !== "todos" && (l.origem || "") !== origemFilter) return false;
       const t = new Date((periodoBase === "updatedAt" ? l.updatedAt : l.createdAt) || l.createdAt).getTime();
       if (!(t >= from && t <= to)) return false;
       if (s && !(l.empresa.toLowerCase().includes(s) || l.cidade.toLowerCase().includes(s) || (l.decisorNome || "").toLowerCase().includes(s))) return false;
       return true;
     });
-  }, [bdrLeads, nichoFilter, matFilter, porteFilter, periodRange, periodoBase, search]);
+  }, [bdrLeads, nichoFilter, matFilter, porteFilter, origemFilter, periodRange, periodoBase, search]);
   // tabela adiciona o filtro de etapa; Kanban usa etapa pra mostrar só a coluna
   const filtered = useMemo(() => common.filter((l) => !statusFilter || l.status === statusFilter).sort((a, b) => b.maturidade - a.maturidade), [common, statusFilter]);
 
   const metrics = useMemo(() => funnelMetrics(common), [common]);
   const countByBdr = (b: string) => leads.filter((l) => l.bdr === b).length;
-  const limparFiltros = () => { setNichoFilter("todos"); setMatFilter("todos"); setPorteFilter([]); setPeriodoPreset("tudo"); setStatusFilter(null); setDtDe(""); setDtAte(""); };
+  const limparFiltros = () => { setNichoFilter("todos"); setMatFilter("todos"); setPorteFilter([]); setOrigemFilter("todos"); setPeriodoPreset("tudo"); setStatusFilter(null); setDtDe(""); setDtAte(""); };
   const open = openId ? leads.find((l) => l.id === openId) || null : null;
 
   // seleção (remover leads)
@@ -172,6 +176,22 @@ export const HubOutbound: React.FC<HubProps> = ({ teamMembers, closers = [] }) =
     const rows = bdrFilter === "todos" ? leads : leads.filter((l) => l.bdr === bdrFilter);
     if (!rows.length) { setBanner({ ok: false, msg: "Nada pra exportar." }); return; }
     downloadCSV(`prospeccao_${bdrFilter}_${new Date().toISOString().slice(0, 10)}.csv`, toCSV(rows));
+  };
+  // exporta a visão atual da TABELA (respeita os filtros) em Excel (.xlsx)
+  const exportXlsx = () => {
+    if (!filtered.length) { setBanner({ ok: false, msg: "Nada pra exportar na tabela." }); return; }
+    const linhas = filtered.map((l) => ({
+      Empresa: l.empresa || "", CNPJ: l.cnpj || "", Nicho: l.nicho || "", Cidade: l.cidade || "", UF: l.estado || "",
+      Decisor: l.decisorNome || "", Cargo: l.decisorCargo || "", Telefones: allPhones(l).map((p) => p.numero).join(" | "),
+      "E-mail": l.decisorEmail || l.email || "", Dono: l.bdr || "", Porte: l.empresaInfo?.porte || "", Origem: l.origem || "",
+      Maturidade: l.maturidadeNivel || "", Etapa: STATUS_LABELS[l.status], "Motivo perda": l.motivoPerda || "",
+      Criado: l.createdAt ? new Date(l.createdAt).toLocaleDateString("pt-BR") : "", Atualizado: l.updatedAt ? new Date(l.updatedAt).toLocaleDateString("pt-BR") : "",
+    }));
+    const ws = XLSX.utils.json_to_sheet(linhas);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Leads");
+    XLSX.writeFile(wb, `hub_outbound_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    setBanner({ ok: true, msg: `${linhas.length} lead(s) exportado(s) para Excel (.xlsx).` });
   };
   const clearAll = () => { if (confirm("Limpar o board do Hub? (os leads continuam na Prospecção; leads novos voltam a aparecer no próximo upload)")) { markDismissed(leads.map((l) => l.id)); persist([]); } };
 
@@ -304,6 +324,10 @@ export const HubOutbound: React.FC<HubProps> = ({ teamMembers, closers = [] }) =
                 {NIVEIS.map((nv) => <option key={nv} value={nv}>Maturidade {nv}</option>)}
               </select>
               <PorteMultiSelect options={portesDisponiveis} selected={porteFilter} onChange={setPorteFilter} />
+              <select value={origemFilter} onChange={(e) => setOrigemFilter(e.target.value)} className="rounded-lg border border-[var(--color-v4-border)] bg-[var(--color-v4-surface)] text-white px-2 py-1.5 text-xs" title="Origem / canal">
+                <option value="todos">Toda origem</option>
+                {origensDisponiveis.map((o) => <option key={o} value={o}>{o}</option>)}
+              </select>
               <select value={statusFilter || ""} onChange={(e) => setStatusFilter((e.target.value || null) as Status | null)} className="rounded-lg border border-[var(--color-v4-border)] bg-[var(--color-v4-surface)] text-white px-2 py-1.5 text-xs">
                 <option value="">Todas as etapas</option>
                 {STATUS_ORDER.map((s) => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}
@@ -327,7 +351,7 @@ export const HubOutbound: React.FC<HubProps> = ({ teamMembers, closers = [] }) =
                 filtered={filtered} selected={selected} allVisibleSelected={allVisibleSelected}
                 toggleSel={toggleSel} toggleAllVisible={toggleAllVisible} removeSelected={removeSelected}
                 clearSel={() => setSelected(new Set())} onOpen={(id) => setOpenId(id)}
-                statusFilter={statusFilter} setStatusFilter={setStatusFilter}
+                statusFilter={statusFilter} setStatusFilter={setStatusFilter} onExportXlsx={exportXlsx}
               />
             )}
 
@@ -502,8 +526,8 @@ const KanbanBoard: React.FC<{ leads: ProspLead[]; onlyStatus?: Status | null; on
 const TabelaView: React.FC<{
   filtered: ProspLead[]; selected: Set<string>; allVisibleSelected: boolean;
   toggleSel: (id: string) => void; toggleAllVisible: () => void; removeSelected: () => void; clearSel: () => void;
-  onOpen: (id: string) => void; statusFilter: Status | null; setStatusFilter: (s: Status | null) => void;
-}> = ({ filtered, selected, allVisibleSelected, toggleSel, toggleAllVisible, removeSelected, clearSel, onOpen, statusFilter, setStatusFilter }) => (
+  onOpen: (id: string) => void; statusFilter: Status | null; setStatusFilter: (s: Status | null) => void; onExportXlsx: () => void;
+}> = ({ filtered, selected, allVisibleSelected, toggleSel, toggleAllVisible, removeSelected, clearSel, onOpen, statusFilter, setStatusFilter, onExportXlsx }) => (
   <>
     <div className="flex flex-wrap items-center gap-1.5 mb-3">
       <span className="text-[11px] text-[var(--color-v4-text-muted)]">Filtrar etapa:</span>
@@ -513,6 +537,8 @@ const TabelaView: React.FC<{
           style={statusFilter === s ? { background: STATUS_COLOR[s] } : undefined}>{STATUS_LABELS[s]}</button>
       ))}
       {statusFilter && <button onClick={() => setStatusFilter(null)} className="text-[10.5px] underline text-[var(--color-v4-text-muted)]">limpar</button>}
+      <div className="flex-1" />
+      <button onClick={onExportXlsx} className="inline-flex items-center gap-1.5 rounded-lg text-white px-3 py-1.5 text-xs font-semibold" style={{ background: "#1f8a4c" }} title="Baixar a tabela (respeita os filtros) em Excel"><Download size={13} /> Baixar Excel (.xlsx)</button>
     </div>
 
     {selected.size > 0 && (

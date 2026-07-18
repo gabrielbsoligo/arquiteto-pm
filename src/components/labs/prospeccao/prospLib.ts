@@ -31,6 +31,7 @@ export interface ProspLead {
   // operacional
   bdr: string | null;   // dono/responsável da lista
   nicho: string;        // nicho da lista (ex.: "Mercado Imobiliário / Incorporadoras")
+  origem?: string;      // origem/canal do lead (ex.: "Lista Fria", "Disparo", "Email")
   maturidade: number;   // 1..5 — presença digital (proxy automático)
   abordagem: string;
   status: "novo" | "abordando" | "conexao" | "agendado" | "realizado" | "fechado";
@@ -122,7 +123,7 @@ function buildHeaderMap(headers: string[]): Partial<Record<keyof typeof FIELD_AL
 export interface ParseResult { leads: ProspLead[]; matched: string[]; missing: string[]; rows: number; }
 
 /** Lê um File (CSV ou XLS/XLSX) e devolve os leads mapeados. */
-export async function parseFile(file: File, batch: string, nicho = "", owner: string | null = null): Promise<ParseResult> {
+export async function parseFile(file: File, batch: string, nicho = "", owner: string | null = null, origem = ""): Promise<ParseResult> {
   const buf = await file.arrayBuffer();
   const wb = XLSX.read(buf, { type: "array" });
   const ws = wb.Sheets[wb.SheetNames[0]];
@@ -147,7 +148,7 @@ export async function parseFile(file: File, batch: string, nicho = "", owner: st
       cidade: get(row, "cidade"), estado: get(row, "estado"),
       instagram: get(row, "instagram"), facebook: get(row, "facebook"),
       linkedin: get(row, "linkedin"), youtube: get(row, "youtube"),
-      bdr: owner, nicho, maturidade: 0, abordagem: "", status: "novo", notas: "", batch, createdAt: new Date().toISOString(),
+      bdr: owner, nicho, origem: origem || "Lista Fria", maturidade: 0, abordagem: "", status: "novo", notas: "", batch, createdAt: new Date().toISOString(),
     };
     lead.maturidade = autoMaturidade(lead); // nota automática inicial (norte de prioridade)
     leads.push(lead);

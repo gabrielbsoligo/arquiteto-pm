@@ -29,6 +29,7 @@ import { LabPerfSdrRoute } from "./components/labs/PerfSdrDashboard";
 import { LabProspeccaoRoute } from "./components/labs/ProspeccaoHub";
 import { LabHubOutboundRoute } from "./components/labs/HubOutbound";
 import { LabDisparosRoute } from "./components/labs/DisparosCalc";
+import { LabEmailDisparosRoute } from "./components/labs/EmailDisparos";
 import { RoletaAssignModal } from "./components/RoletaAssignModal";
 import type { Lead } from "./types";
 import { supabase } from "./lib/supabase";
@@ -269,6 +270,7 @@ const MainApp: React.FC = () => {
       case "prospeccao": return <LabProspeccaoRoute />;
       case "hub_outbound": return <LabHubOutboundRoute />;
       case "disparos": return <LabDisparosRoute />;
+      case "email_disparos": return <LabEmailDisparosRoute />;
       case "call_quality": return <CallQualityView />;
       case "geral": return <GeralView />;
       case "equipe": return <EquipeView />;
@@ -340,6 +342,18 @@ export default function App() {
         <Toaster position="top-right" />
         <div className="flex h-screen w-full bg-[var(--color-v4-bg)]">
           <LabDisparosRoute />
+        </div>
+      </AppProvider>
+    );
+  }
+
+  // Rota standalone do Disparo de Emails
+  if (labsView === 'email_disparos') {
+    return (
+      <AppProvider>
+        <Toaster position="top-right" />
+        <div className="flex h-screen w-full bg-[var(--color-v4-bg)]">
+          <LabEmailDisparosRoute />
         </div>
       </AppProvider>
     );

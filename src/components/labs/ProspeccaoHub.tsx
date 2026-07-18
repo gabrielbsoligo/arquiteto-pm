@@ -88,7 +88,7 @@ export const ProspeccaoHub: React.FC<HubProps> = ({ teamMembers, closers = [] })
       let linhas = 0;
       for (const f of files) {
         const batch = f.name.replace(/\.(csv|xlsx?|xls)$/i, "");
-        const res = await parseFile(f, batch, nicho, null);
+        const res = await parseFile(f, batch, nicho, null, "Lista Fria");
         matched = res.matched; missing = res.missing;
         linhas += res.leads.length;
         rawFresh = [...rawFresh, ...res.leads];
