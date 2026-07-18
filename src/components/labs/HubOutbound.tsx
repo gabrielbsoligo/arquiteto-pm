@@ -127,9 +127,7 @@ export const HubOutbound: React.FC<HubProps> = ({ teamMembers, closers = [] }) =
     if (to === "enriquecimento" && !lead.enriquecidoEm) {
       const dados = enrichLead(lead);
       updateLead(lead.id, { status: to, ...dados });
-      const n = (dados.telefonesExtra?.length || 0) + (dados.sociosExtra?.length || 0);
-      setBanner({ ok: true, msg: `${lead.empresa}: enriquecido via Lemit — +${dados.telefonesExtra?.length || 0} telefone(s), +${dados.sociosExtra?.length || 0} sócio(s) e dados cadastrais.` });
-      void n;
+      setBanner({ ok: true, msg: `${lead.empresa}: enriquecido via Lemit — decisor ${dados.decisorNome || "—"} preenchido · +${dados.telefonesExtra?.length || 0} telefone(s), +${dados.sociosExtra?.length || 0} sócio(s) e dados cadastrais.` });
       return;
     }
     updateLead(lead.id, { status: to });
@@ -139,7 +137,7 @@ export const HubOutbound: React.FC<HubProps> = ({ teamMembers, closers = [] }) =
   const enrich = (lead: ProspLead) => {
     const dados = enrichLead(lead);
     updateLead(lead.id, dados);
-    setBanner({ ok: true, msg: `${lead.empresa}: dados do Lemit atualizados — ${dados.telefonesExtra?.length || 0} telefone(s) extra, ${dados.sociosExtra?.length || 0} sócio(s), dados cadastrais.` });
+    setBanner({ ok: true, msg: `${lead.empresa}: dados do Lemit atualizados — decisor ${dados.decisorNome || "—"} · ${dados.telefonesExtra?.length || 0} telefone(s) extra, ${dados.sociosExtra?.length || 0} sócio(s), dados cadastrais.` });
   };
 
   const onDragEnd = (r: DropResult) => {
@@ -700,7 +698,9 @@ const LeadPanel: React.FC<{ lead: ProspLead; closers: Member[]; onClose: () => v
 
           {/* DECISOR */}
           <div className={`${card} p-4`}>
-            <p className="text-sm font-bold text-white flex items-center gap-1.5 mb-2"><UserCheck size={15} style={{ color: RED }} /> Decisor (contato)</p>
+            <p className="text-sm font-bold text-white flex items-center gap-1.5 mb-2"><UserCheck size={15} style={{ color: RED }} /> Decisor (contato)
+              {lead.enriquecidoEm && <span className="inline-flex items-center gap-1 text-[9px] font-semibold px-1.5 py-0.5 rounded" style={{ color: RED, background: "var(--color-v4-surface)" }}><Database size={9} /> preenchido via Lemit</span>}
+            </p>
             <div className="grid grid-cols-2 gap-3">
               <FieldEdit label="Nome" value={lead.decisorNome} onChange={(v) => onUpdate({ decisorNome: v })} />
               <FieldEdit label="Cargo" value={lead.decisorCargo} onChange={(v) => onUpdate({ decisorCargo: v })} placeholder="CEO, Diretor Comercial, Sócia…" />

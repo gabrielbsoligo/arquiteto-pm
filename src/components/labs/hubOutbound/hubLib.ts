@@ -338,12 +338,27 @@ export function enrichLead(lead: ProspLead): Partial<ProspLead> {
     faturamentoEstimado: ["até R$ 360 mil/ano", "R$ 360 mil – R$ 1 mi", "R$ 1 mi – R$ 5 mi", "R$ 5 mi – R$ 20 mi", "R$ 20 mi+"][Math.floor(rng() * 5)],
   };
 
+  const emailsExtra = [`comercial@${(lead.empresa || "empresa").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 14) || "empresa"}.com.br`];
+
+  // DECISOR: o Lemit identifica o sócio-decisor e seus contatos. Aqui a gente
+  // COMPLETA os campos do decisor que estiverem vazios (sem sobrescrever o que o
+  // BDR já preencheu). Prioriza: já preenchido → sócio 1 da lista → sócio do
+  // quadro societário (maior participação).
+  const socioTop = [...sociosExtra].sort((a, b) => (parseInt(b.participacao || "0") - parseInt(a.participacao || "0")))[0];
+  const decisorNome = lead.decisorNome || lead.socio1 || socioTop?.nome || "";
+  const firstName = (decisorNome.split(" ")[0] || "contato").toLowerCase().normalize("NFD").replace(/[^a-z]/g, "");
+  const decisorCargo = lead.decisorCargo || (lead.socio1 ? "Sócio(a)" : socioTop?.cargo) || (decisorNome ? "Sócio-administrador" : "");
+  const decisorTel = lead.decisorTel || lead.whatsapp1 || socioTop?.telefone || tels[0]?.numero || "";
+  const decisorEmail = lead.decisorEmail || lead.email || (firstName ? `${firstName}@${(lead.empresa || "empresa").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 14) || "empresa"}.com.br` : emailsExtra[0]) || "";
+
   return {
     telefonesExtra: tels,
-    emailsExtra: [`comercial@${(lead.empresa || "empresa").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 14) || "empresa"}.com.br`],
+    emailsExtra,
     sociosExtra,
     empresaInfo,
     cnpj: lead.cnpj || genCNPJ(rng),
+    // decisor preenchido automaticamente (só completa gaps)
+    decisorNome, decisorCargo, decisorTel, decisorEmail,
     enriquecidoEm: new Date().toISOString(),
   };
 }
