@@ -24,6 +24,7 @@ import {
   Activity,
   Gauge,
   Rocket,
+  LayoutGrid,
 } from "lucide-react";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
@@ -33,7 +34,7 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export type View = "pipeline" | "leads" | "reunioes" | "agendas_time" | "performance" | "metas" | "comissoes" | "contratos" | "equipe" | "dashboard" | "blackbox" | "leadbroker" | "auditoria" | "prepcall" | "3c_manual" | "roleta_historico" | "playbook" | "perf_sdr" | "perf_visual" | "call_quality" | "geral" | "prospeccao";
+export type View = "pipeline" | "leads" | "reunioes" | "agendas_time" | "performance" | "metas" | "comissoes" | "contratos" | "equipe" | "dashboard" | "blackbox" | "leadbroker" | "auditoria" | "prepcall" | "3c_manual" | "roleta_historico" | "playbook" | "perf_sdr" | "perf_visual" | "call_quality" | "geral" | "prospeccao" | "hub_outbound";
 
 export const Layout: React.FC<{
   children: ReactNode;
@@ -51,6 +52,7 @@ export const Layout: React.FC<{
     { id: "pipeline" as const, label: "Pipeline", icon: Briefcase },
     { id: "leads" as const, label: "Leads", icon: Target },
     { id: "prospeccao" as const, label: "Prospecção", icon: Rocket, badge: "novo" },
+    { id: "hub_outbound" as const, label: "Hub Outbound", icon: LayoutGrid, badge: "novo" },
     { id: "reunioes" as const, label: "Reuniões", icon: Calendar },
     { id: "agendas_time" as const, label: "Agendas", icon: CalendarClock },
     { id: "prepcall" as const, label: "Prep Call", icon: Sparkles },

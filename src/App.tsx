@@ -27,6 +27,7 @@ import { BriefingApresentacao } from "./components/BriefingApresentacao";
 import { TVMode } from "./components/TVMode";
 import { LabPerfSdrRoute } from "./components/labs/PerfSdrDashboard";
 import { LabProspeccaoRoute } from "./components/labs/ProspeccaoHub";
+import { LabHubOutboundRoute } from "./components/labs/HubOutbound";
 import { RoletaAssignModal } from "./components/RoletaAssignModal";
 import type { Lead } from "./types";
 import { supabase } from "./lib/supabase";
@@ -265,6 +266,7 @@ const MainApp: React.FC = () => {
       case "perf_sdr": return <PerfSdrView />;
       case "perf_visual": return <LabPerfSdrRoute />;
       case "prospeccao": return <LabProspeccaoRoute />;
+      case "hub_outbound": return <LabHubOutboundRoute />;
       case "call_quality": return <CallQualityView />;
       case "geral": return <GeralView />;
       case "equipe": return <EquipeView />;
@@ -312,6 +314,18 @@ export default function App() {
         <Toaster position="top-right" />
         <div className="flex h-screen w-full bg-[var(--color-v4-bg)]">
           <LabProspeccaoRoute />
+        </div>
+      </AppProvider>
+    );
+  }
+
+  // Rota standalone do Hub Outbound (CRM de sales engagement; localStorage próprio)
+  if (labsView === 'hub_outbound') {
+    return (
+      <AppProvider>
+        <Toaster position="top-right" />
+        <div className="flex h-screen w-full bg-[var(--color-v4-bg)]">
+          <LabHubOutboundRoute />
         </div>
       </AppProvider>
     );
