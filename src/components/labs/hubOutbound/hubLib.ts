@@ -178,13 +178,22 @@ const FIELD_ALIASES: Record<keyof Pick<ProspLead,
 
 function buildHeaderMap(headers: string[]): Partial<Record<keyof typeof FIELD_ALIASES, number>> {
   const map: any = {};
-  headers.forEach((h, i) => {
-    const n = norm(h);
-    for (const field of Object.keys(FIELD_ALIASES) as (keyof typeof FIELD_ALIASES)[]) {
-      if (map[field] != null) continue;
-      if (FIELD_ALIASES[field].some((a) => a === n || n.includes(a))) map[field] = i;
-    }
-  });
+  const norms = headers.map(norm);
+  const fields = Object.keys(FIELD_ALIASES) as (keyof typeof FIELD_ALIASES)[];
+  const used = new Set<number>();
+  // 2 passes: 1º EXATO, 2º SUBSTRING nas colunas restantes — evita que "CNPJ EMPRESA"
+  // seja engolida pelo campo empresa. Cada coluna vai a 1 campo só.
+  const assign = (pred: (n: string, a: string) => boolean) => {
+    norms.forEach((n, i) => {
+      if (used.has(i)) return;
+      for (const field of fields) {
+        if (map[field] != null) continue;
+        if (FIELD_ALIASES[field].some((a) => pred(n, a))) { map[field] = i; used.add(i); break; }
+      }
+    });
+  };
+  assign((n, a) => a === n);
+  assign((n, a) => !!a && n.includes(a));
   return map;
 }
 
