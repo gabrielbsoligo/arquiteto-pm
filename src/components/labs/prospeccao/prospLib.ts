@@ -93,12 +93,12 @@ const norm = (s: string) =>
 // mapa de campo canônico -> lista de headers aceitos (normalizados)
 const FIELD_ALIASES: Record<keyof Pick<ProspLead,
   "empresa" | "cnpj" | "socio1" | "socio2" | "whatsapp1" | "whatsapp2" | "email" | "site" | "cidade" | "estado" | "instagram" | "facebook" | "linkedin" | "youtube">, string[]> = {
-  empresa: ["nome empresa", "empresa", "razao social", "nome fantasia"],
-  cnpj: ["cnpj", "cnpj empresa", "cnpj cpf", "cpf cnpj", "documento", "doc"],
-  socio1: ["nome socio 1", "socio 1", "socio1", "nome socio"],
+  empresa: ["nome empresa", "empresas associadas", "empresa associada", "empresas", "empresa", "razao social", "nome fantasia"],
+  cnpj: ["cnpj", "cpf cnpj atrelado", "cnpj atrelado", "cnpj empresa", "cnpj cpf", "cpf cnpj", "documento"],
+  socio1: ["nome socio 1", "socio 1", "socio1", "nome socio", "razao social socios", "nome razao social socios", "socios", "socio"],
   socio2: ["nome socio 2", "socio 2", "socio2"],
-  whatsapp1: ["celular whatsapp 1", "celular 1", "whatsapp 1", "telefone 1", "celular whatsapp", "telefone", "celular"],
-  whatsapp2: ["celular whatsapp 2", "celular 2", "whatsapp 2", "telefone 2"],
+  whatsapp1: ["celular whatsapp 1", "celular 1", "celular1", "whatsapp 1", "telefone 1", "celular whatsapp", "telefone", "celular"],
+  whatsapp2: ["celular whatsapp 2", "celular 2", "celular2", "whatsapp 2", "telefone 2"],
   email: ["email", "e mail"],
   site: ["site empresa", "site", "website", "url"],
   cidade: ["cidade", "municipio"],
@@ -117,11 +117,14 @@ function buildHeaderMap(headers: string[]): Partial<Record<keyof typeof FIELD_AL
   // 2 passes: 1º casa EXATO (mais confiável), 2º por SUBSTRING nas colunas restantes.
   // Assim uma coluna "CNPJ EMPRESA" vai pro campo cnpj (exato) e não é engolida pelo
   // campo empresa (que casaria por substring "empresa"). Cada coluna vai a 1 campo só.
+  const ehColunaSocio = (n: string) => /\bsocios?\b/.test(n); // "... (Socios)" → coluna de sócio
   const assign = (pred: (n: string, a: string) => boolean) => {
     norms.forEach((n, i) => {
       if (used.has(i)) return;
       for (const field of fields) {
         if (map[field] != null) continue;
+        // uma coluna de SÓCIO nunca vira empresa (ex.: "NOME/RAZAO_SOCIAL (Socios)")
+        if (field === "empresa" && ehColunaSocio(n)) continue;
         if (FIELD_ALIASES[field].some((a) => pred(n, a))) { map[field] = i; used.add(i); break; }
       }
     });
@@ -146,6 +149,16 @@ export async function parseFile(file: File, batch: string, nicho = "", owner: st
     const idx = hmap[f];
     return idx != null ? String(row[idx] ?? "").trim() : "";
   };
+  // telefone em colunas separadas (ex.: DDD1 | CELULAR1): combina DDD + número
+  const dddIdx = (which: number) => headers.findIndex((h) => { const n = norm(h); return n === `ddd${which}` || n === `ddd ${which}` || (which === 1 && n === "ddd"); });
+  const ddd1i = dddIdx(1), ddd2i = dddIdx(2);
+  const comDDD = (numero: string, dddCol: number, row: string[]) => {
+    const num = onlyDigits(numero);
+    if (!num) return numero;
+    if (num.length >= 10) return numero; // já tem DDD embutido
+    const ddd = dddCol >= 0 ? onlyDigits(String(row[dddCol] ?? "")) : "";
+    return ddd ? `${ddd}${num}` : numero;
+  };
   const leads: ProspLead[] = [];
   for (let r = 1; r < matrix.length; r++) {
     const row = matrix[r] || [];
@@ -153,8 +166,8 @@ export async function parseFile(file: File, batch: string, nicho = "", owner: st
     if (!empresa && !get(row, "email") && !get(row, "whatsapp1")) continue; // linha vazia
     const lead: ProspLead = {
       id: `${batch}-${r}-${Math.abs(hashStr(empresa + get(row, "email") + r))}`,
-      empresa, cnpj: cnpjLimpo(get(row, "cnpj")), socio1: get(row, "socio1"), socio2: get(row, "socio2"),
-      whatsapp1: get(row, "whatsapp1"), whatsapp2: get(row, "whatsapp2"),
+      empresa, cnpj: formatarCNPJ(get(row, "cnpj")), socio1: get(row, "socio1"), socio2: get(row, "socio2"),
+      whatsapp1: comDDD(get(row, "whatsapp1"), ddd1i, row), whatsapp2: comDDD(get(row, "whatsapp2"), ddd2i, row),
       email: get(row, "email"), site: get(row, "site"),
       cidade: get(row, "cidade"), estado: get(row, "estado"),
       instagram: get(row, "instagram"), facebook: get(row, "facebook"),
@@ -280,8 +293,8 @@ export function loadLeads(): ProspLead[] {
       notas: l.notas || "",
       // origem por canal: vazia ou igual ao nome do lote (arquivo importado) => "Lista Fria"
       origem: (l.origem && l.origem !== l.batch) ? l.origem : "Lista Fria",
-      // limpa CNPJ fabricado de versões antigas: mantém só CNPJ real (dígitos válidos)
-      cnpj: cnpjLimpo(l.cnpj),
+      // preserva o CNPJ da lista fielmente (formata e recupera zeros à esquerda)
+      cnpj: formatarCNPJ(l.cnpj),
       status: VALID_STATUS.has(l.status) ? l.status : (STATUS_MIGRA[l.status as string] || "novo"),
       maturidade: l.maturidade && l.maturidade > 0 ? l.maturidade : autoMaturidade(l),
     }));
