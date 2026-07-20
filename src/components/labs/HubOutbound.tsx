@@ -449,19 +449,26 @@ const KanbanBoard: React.FC<{ leads: ProspLead[]; onlyStatus?: Status | null; on
   return (
     <DragDropContext onDragEnd={onDragEnd}>
       <style>{`
-        .v4-kanban-scroll{ overflow-x:scroll; overflow-y:auto; max-height:calc(100vh - 360px); min-height:220px; scrollbar-width:auto; scrollbar-color:var(--color-v4-red) var(--color-v4-surface); }
-        .v4-kanban-scroll::-webkit-scrollbar{ height:14px; width:12px; }
+        /* rolagem HORIZONTAL do quadro (barra vermelha embaixo) */
+        .v4-kanban-scroll{ overflow-x:auto; overflow-y:hidden; height:calc(100vh - 340px); min-height:320px; scrollbar-width:auto; scrollbar-color:var(--color-v4-red) var(--color-v4-surface); }
+        .v4-kanban-scroll::-webkit-scrollbar{ height:14px; }
         .v4-kanban-scroll::-webkit-scrollbar-track{ background:var(--color-v4-surface); border-radius:8px; }
         .v4-kanban-scroll::-webkit-scrollbar-thumb{ background:var(--color-v4-red); border-radius:8px; border:3px solid var(--color-v4-surface); }
         .v4-kanban-scroll::-webkit-scrollbar-thumb:hover{ background:#ff5a67; }
         .v4-kanban-scroll::-webkit-scrollbar-corner{ background:var(--color-v4-surface); }
+        /* corpo de CADA coluna: rolagem vertical própria (títulos ficam fixos acima) */
+        .v4-col-scroll{ overflow-y:auto; overflow-x:hidden; scrollbar-width:thin; scrollbar-color:var(--color-v4-red) var(--color-v4-surface); }
+        .v4-col-scroll::-webkit-scrollbar{ width:9px; }
+        .v4-col-scroll::-webkit-scrollbar-track{ background:var(--color-v4-surface); border-radius:8px; }
+        .v4-col-scroll::-webkit-scrollbar-thumb{ background:var(--color-v4-red); border-radius:8px; border:2px solid var(--color-v4-surface); }
+        .v4-col-scroll::-webkit-scrollbar-thumb:hover{ background:#ff5a67; }
       `}</style>
-      <div className="v4-kanban-scroll flex gap-3 pb-2 items-start">
+      <div className="v4-kanban-scroll flex gap-3 pb-2 items-stretch">
         {cols.map((s) => {
           const col = byStatus(s);
           return (
-            <div key={s} className="w-[230px] shrink-0">
-              <div className="v4-kanban-head sticky top-0 z-20 flex items-center gap-2 mb-2 px-2 py-2 rounded-lg bg-[var(--color-v4-bg)] border-b border-[var(--color-v4-border)]">
+            <div key={s} className="w-[230px] shrink-0 flex flex-col min-h-0">
+              <div className="flex items-center gap-2 mb-2 px-2 py-2 rounded-lg bg-[var(--color-v4-card)] border border-[var(--color-v4-border)] shrink-0">
                 <span className="w-2 h-2 rounded-full" style={{ background: STATUS_COLOR[s] }} />
                 <span className="text-[11px] font-bold text-white uppercase tracking-wide truncate">{STATUS_LABELS[s]}</span>
                 <span className="ml-auto text-[11px] text-[var(--color-v4-text-muted)] font-semibold">{col.length}</span>
@@ -469,7 +476,7 @@ const KanbanBoard: React.FC<{ leads: ProspLead[]; onlyStatus?: Status | null; on
               <Droppable droppableId={s}>
                 {(provided, snap) => (
                   <div ref={provided.innerRef} {...provided.droppableProps}
-                    className={`rounded-xl border p-2 min-h-[120px] transition-colors ${snap.isDraggingOver ? "border-[var(--color-v4-red)] bg-[var(--color-v4-surface)]" : "border-[var(--color-v4-border)] bg-[var(--color-v4-card)]"}`}>
+                    className={`v4-col-scroll rounded-xl border p-2 flex-1 min-h-0 transition-colors ${snap.isDraggingOver ? "border-[var(--color-v4-red)] bg-[var(--color-v4-surface)]" : "border-[var(--color-v4-border)] bg-[var(--color-v4-card)]"}`}>
                     <div className="text-[9px] text-[var(--color-v4-text-muted)] mb-1.5 px-1">{STATUS_HINT[s]}</div>
                     {col.map((l: ProspLead, i: number) => (
                       <Draggable draggableId={l.id} index={i} key={l.id}>
