@@ -92,8 +92,9 @@ const norm = (s: string) =>
 
 // mapa de campo canônico -> lista de headers aceitos (normalizados)
 const FIELD_ALIASES: Record<keyof Pick<ProspLead,
-  "empresa" | "socio1" | "socio2" | "whatsapp1" | "whatsapp2" | "email" | "site" | "cidade" | "estado" | "instagram" | "facebook" | "linkedin" | "youtube">, string[]> = {
+  "empresa" | "cnpj" | "socio1" | "socio2" | "whatsapp1" | "whatsapp2" | "email" | "site" | "cidade" | "estado" | "instagram" | "facebook" | "linkedin" | "youtube">, string[]> = {
   empresa: ["nome empresa", "empresa", "razao social", "nome fantasia"],
+  cnpj: ["cnpj", "cnpj empresa", "cnpj cpf", "cpf cnpj", "documento", "doc"],
   socio1: ["nome socio 1", "socio 1", "socio1", "nome socio"],
   socio2: ["nome socio 2", "socio 2", "socio2"],
   whatsapp1: ["celular whatsapp 1", "celular 1", "whatsapp 1", "telefone 1", "celular whatsapp", "telefone", "celular"],
@@ -142,7 +143,7 @@ export async function parseFile(file: File, batch: string, nicho = "", owner: st
     if (!empresa && !get(row, "email") && !get(row, "whatsapp1")) continue; // linha vazia
     const lead: ProspLead = {
       id: `${batch}-${r}-${Math.abs(hashStr(empresa + get(row, "email") + r))}`,
-      empresa, socio1: get(row, "socio1"), socio2: get(row, "socio2"),
+      empresa, cnpj: get(row, "cnpj"), socio1: get(row, "socio1"), socio2: get(row, "socio2"),
       whatsapp1: get(row, "whatsapp1"), whatsapp2: get(row, "whatsapp2"),
       email: get(row, "email"), site: get(row, "site"),
       cidade: get(row, "cidade"), estado: get(row, "estado"),
@@ -205,6 +206,26 @@ export function channelLink(lead: ProspLead, kind: "site" | "instagram" | "faceb
 }
 
 export const onlyDigits = (s: string) => String(s || "").replace(/\D/g, "");
+
+/** Valida um CNPJ pelos dígitos verificadores (módulo 11). Usado pra descartar
+ *  CNPJs fabricados que ficaram gravados de versões antigas — CNPJ real da lista
+ *  passa; número aleatório inventado quase sempre falha. */
+export function cnpjValido(v: string): boolean {
+  const c = onlyDigits(v);
+  if (c.length !== 14) return false;
+  if (/^(\d)\1{13}$/.test(c)) return false; // todos iguais
+  const dv = (base: string) => {
+    let soma = 0, peso = base.length - 7;
+    for (let i = 0; i < base.length; i++) { soma += parseInt(base[i]) * peso; peso = peso === 2 ? 9 : peso - 1; }
+    const r = soma % 11; return r < 2 ? 0 : 11 - r;
+  };
+  const d1 = dv(c.slice(0, 12));
+  const d2 = dv(c.slice(0, 12) + d1);
+  return d1 === parseInt(c[12]) && d2 === parseInt(c[13]);
+}
+/** Devolve o CNPJ apenas se for válido; senão string vazia (não engana a equipe). */
+export const cnpjLimpo = (v?: string) => (v && cnpjValido(v) ? v : "");
+
 /** Link click-to-call API4COM (protocolo) a partir do número. */
 export function callLink(phone: string): string {
   const d = onlyDigits(phone);
@@ -239,6 +260,8 @@ export function loadLeads(): ProspLead[] {
       notas: l.notas || "",
       // origem por canal: vazia ou igual ao nome do lote (arquivo importado) => "Lista Fria"
       origem: (l.origem && l.origem !== l.batch) ? l.origem : "Lista Fria",
+      // limpa CNPJ fabricado de versões antigas: mantém só CNPJ real (dígitos válidos)
+      cnpj: cnpjLimpo(l.cnpj),
       status: VALID_STATUS.has(l.status) ? l.status : (STATUS_MIGRA[l.status as string] || "novo"),
       maturidade: l.maturidade && l.maturidade > 0 ? l.maturidade : autoMaturidade(l),
     }));
@@ -504,7 +527,6 @@ const pRng = (seed: number) => { let a = seed >>> 0; return () => { a |= 0; a = 
 const pDDD = (l: ProspLead) => { const d = onlyDigits(l.whatsapp1 || l.whatsapp2 || ""); const s = d.startsWith("55") ? d.slice(2) : d; return s.length >= 10 ? s.slice(0, 2) : "12"; };
 const pCel = (ddd: string, r: () => number) => { let n = "9"; for (let i = 0; i < 8; i++) n += Math.floor(r() * 10); return `(${ddd}) ${n.slice(0, 5)}-${n.slice(5)}`; };
 const pFixo = (ddd: string, r: () => number) => { let n = String(2 + Math.floor(r() * 3)); for (let i = 0; i < 7; i++) n += Math.floor(r() * 10); return `(${ddd}) ${n.slice(0, 4)}-${n.slice(4)}`; };
-const pCNPJ = (r: () => number) => { let s = ""; for (let i = 0; i < 14; i++) s += Math.floor(r() * 10); return `${s.slice(0, 2)}.${s.slice(2, 5)}.${s.slice(5, 8)}/${s.slice(8, 12)}-${s.slice(12)}`; };
 
 /** Enriquece 1 lead (dados cadastrais + telefones + quadro societário + decisor 100%). Mescla com os extras já unificados. */
 export function enrichProsp(lead: ProspLead): ProspLead {
@@ -547,7 +569,8 @@ export function enrichProsp(lead: ProspLead): ProspLead {
   const decisorEmail = lead.decisorEmail || lead.email || `${firstName}@${dominio}`;
 
   return {
-    ...lead, cnpj: lead.cnpj || pCNPJ(r), telefonesExtra: tels, sociosExtra: socios,
+    // CNPJ: SÓ o real, vindo da lista. Nunca fabricar (a equipe usa pra buscar dados oficiais).
+    ...lead, cnpj: lead.cnpj || "", telefonesExtra: tels, sociosExtra: socios,
     emailsExtra: lead.emailsExtra && lead.emailsExtra.length ? lead.emailsExtra : [`comercial@${dominio}`],
     empresaInfo, decisorNome, decisorCargo, decisorTel, decisorEmail, decisorLinkedin: lead.decisorLinkedin || "",
     enriquecidoEm: new Date().toISOString(),

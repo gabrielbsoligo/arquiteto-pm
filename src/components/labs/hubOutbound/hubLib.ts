@@ -296,11 +296,6 @@ function genFixo(ddd: string, rng: () => number): string {
   let n = String(2 + Math.floor(rng() * 3)); for (let i = 0; i < 7; i++) n += Math.floor(rng() * 10);
   return `(${ddd}) ${n.slice(0, 4)}-${n.slice(4)}`;
 }
-function genCNPJ(rng: () => number): string {
-  let s = ""; for (let i = 0; i < 14; i++) s += Math.floor(rng() * 10);
-  return `${s.slice(0, 2)}.${s.slice(2, 5)}.${s.slice(5, 8)}/${s.slice(8, 12)}-${s.slice(12)}`;
-}
-
 /** Simula o enriquecimento do Lemit por CNPJ. Determinístico por lead. */
 export function enrichLead(lead: ProspLead): Partial<ProspLead> {
   const seed = Math.abs(hashStr(lead.empresa + lead.cnpj + lead.id + lead.cidade));
@@ -367,7 +362,8 @@ export function enrichLead(lead: ProspLead): Partial<ProspLead> {
     emailsExtra,
     sociosExtra,
     empresaInfo,
-    cnpj: lead.cnpj || genCNPJ(rng),
+    // CNPJ: SÓ o real, vindo da lista. Nunca fabricar (a equipe usa pra buscar dados oficiais).
+    cnpj: lead.cnpj || "",
     // decisor preenchido automaticamente (garante nome/cargo/telefone/email)
     decisorNome, decisorCargo, decisorTel, decisorEmail, decisorLinkedin,
     enriquecidoEm: new Date().toISOString(),
@@ -405,6 +401,25 @@ export function channelLink(lead: ProspLead, kind: "site" | "instagram" | "faceb
 }
 
 export const onlyDigits = (s: string) => String(s || "").replace(/\D/g, "");
+
+/** Valida CNPJ pelos dígitos verificadores (módulo 11): CNPJ real passa, número
+ *  fabricado de versões antigas quase sempre falha. */
+export function cnpjValido(v: string): boolean {
+  const c = onlyDigits(v);
+  if (c.length !== 14) return false;
+  if (/^(\d)\1{13}$/.test(c)) return false;
+  const dv = (base: string) => {
+    let soma = 0, peso = base.length - 7;
+    for (let i = 0; i < base.length; i++) { soma += parseInt(base[i]) * peso; peso = peso === 2 ? 9 : peso - 1; }
+    const r = soma % 11; return r < 2 ? 0 : 11 - r;
+  };
+  const d1 = dv(c.slice(0, 12));
+  const d2 = dv(c.slice(0, 12) + d1);
+  return d1 === parseInt(c[12]) && d2 === parseInt(c[13]);
+}
+/** CNPJ só se for válido; senão vazio (não engana a equipe com número fabricado). */
+export const cnpjLimpo = (v?: string) => (v && cnpjValido(v) ? v : "");
+
 export function callLink(phone: string): string {
   const d = onlyDigits(phone);
   const full = d.length >= 11 && !d.startsWith("55") ? `55${d}` : d;
@@ -442,13 +457,15 @@ function normalizeLead(l: any): ProspLead {
     ? l.origem
     : "Lista Fria";
   return {
-    cnpj: "", decisorNome: l.decisorNome || l.socio1 || "",
+    decisorNome: l.decisorNome || l.socio1 || "",
     decisorCargo: l.decisorCargo || (l.socio1 ? "Sócio(a)" : ""), decisorTel: l.decisorTel || l.whatsapp1 || "",
     decisorEmail: l.decisorEmail || l.email || "", decisorLinkedin: l.decisorLinkedin || "",
     atividades: Array.isArray(l.atividades) ? l.atividades : [],
     createdAt: l.createdAt || new Date().toISOString(), updatedAt: l.updatedAt || l.createdAt || new Date().toISOString(),
     ...l,
     origem,
+    // CNPJ: só o real (dígitos válidos). Limpa fabricados gravados em versões antigas.
+    cnpj: cnpjLimpo(l.cnpj),
     nicho: l.nicho || "Construtoras / Incorporadoras",
     abordagem: l.abordagem || "", notas: l.notas || "",
     status: VALID_STATUS.has(l.status) ? l.status : (STATUS_MIGRA[l.status as string] || "inteligencia"),
