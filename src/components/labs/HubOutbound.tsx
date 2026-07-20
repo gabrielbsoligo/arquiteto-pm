@@ -461,7 +461,7 @@ const KanbanBoard: React.FC<{ leads: ProspLead[]; onlyStatus?: Status | null; on
           const col = byStatus(s);
           return (
             <div key={s} className="w-[230px] shrink-0">
-              <div className="flex items-center gap-2 mb-2 px-1">
+              <div className="v4-kanban-head sticky top-0 z-20 flex items-center gap-2 mb-2 px-2 py-2 rounded-lg bg-[var(--color-v4-bg)] border-b border-[var(--color-v4-border)]">
                 <span className="w-2 h-2 rounded-full" style={{ background: STATUS_COLOR[s] }} />
                 <span className="text-[11px] font-bold text-white uppercase tracking-wide truncate">{STATUS_LABELS[s]}</span>
                 <span className="ml-auto text-[11px] text-[var(--color-v4-text-muted)] font-semibold">{col.length}</span>
