@@ -212,7 +212,7 @@ export async function parseFile(file: File, batch: string, nicho = "", owner: st
     const socio1 = get(row, "socio1");
     const lead: ProspLead = {
       id: `${batch}-${r}-${Math.abs(hashStr(empresa + get(row, "email") + r))}`,
-      empresa, cnpj: get(row, "cnpj"), socio1, socio2: get(row, "socio2"),
+      empresa, cnpj: cnpjLimpo(get(row, "cnpj")), socio1, socio2: get(row, "socio2"),
       whatsapp1: get(row, "whatsapp1"), whatsapp2: get(row, "whatsapp2"),
       email: get(row, "email"), site: get(row, "site"),
       cidade: get(row, "cidade"), estado: get(row, "estado"),
@@ -402,6 +402,15 @@ export function channelLink(lead: ProspLead, kind: "site" | "instagram" | "faceb
 
 export const onlyDigits = (s: string) => String(s || "").replace(/\D/g, "");
 
+/** Normaliza o CNPJ para XX.XXX.XXX/XXXX-XX, recuperando zeros à esquerda que o
+ *  Excel come quando grava CNPJ como número (00.000.000/0001-91 → 191 → volta). */
+export function formatarCNPJ(v?: string): string {
+  let d = onlyDigits(v || "");
+  if (!d) return "";
+  if (d.length < 14) d = d.padStart(14, "0");
+  if (d.length !== 14) return String(v || "").trim();
+  return `${d.slice(0, 2)}.${d.slice(2, 5)}.${d.slice(5, 8)}/${d.slice(8, 12)}-${d.slice(12)}`;
+}
 /** Valida CNPJ pelos dígitos verificadores (módulo 11): CNPJ real passa, número
  *  fabricado de versões antigas quase sempre falha. */
 export function cnpjValido(v: string): boolean {
@@ -417,8 +426,8 @@ export function cnpjValido(v: string): boolean {
   const d2 = dv(c.slice(0, 12) + d1);
   return d1 === parseInt(c[12]) && d2 === parseInt(c[13]);
 }
-/** CNPJ só se for válido; senão vazio (não engana a equipe com número fabricado). */
-export const cnpjLimpo = (v?: string) => (v && cnpjValido(v) ? v : "");
+/** Normaliza e devolve o CNPJ só se for válido; senão vazio. */
+export const cnpjLimpo = (v?: string) => { const f = formatarCNPJ(v); return cnpjValido(f) ? f : ""; };
 
 export function callLink(phone: string): string {
   const d = onlyDigits(phone);

@@ -143,7 +143,7 @@ export async function parseFile(file: File, batch: string, nicho = "", owner: st
     if (!empresa && !get(row, "email") && !get(row, "whatsapp1")) continue; // linha vazia
     const lead: ProspLead = {
       id: `${batch}-${r}-${Math.abs(hashStr(empresa + get(row, "email") + r))}`,
-      empresa, cnpj: get(row, "cnpj"), socio1: get(row, "socio1"), socio2: get(row, "socio2"),
+      empresa, cnpj: cnpjLimpo(get(row, "cnpj")), socio1: get(row, "socio1"), socio2: get(row, "socio2"),
       whatsapp1: get(row, "whatsapp1"), whatsapp2: get(row, "whatsapp2"),
       email: get(row, "email"), site: get(row, "site"),
       cidade: get(row, "cidade"), estado: get(row, "estado"),
@@ -207,9 +207,18 @@ export function channelLink(lead: ProspLead, kind: "site" | "instagram" | "faceb
 
 export const onlyDigits = (s: string) => String(s || "").replace(/\D/g, "");
 
-/** Valida um CNPJ pelos dígitos verificadores (módulo 11). Usado pra descartar
- *  CNPJs fabricados que ficaram gravados de versões antigas — CNPJ real da lista
- *  passa; número aleatório inventado quase sempre falha. */
+/** Normaliza o CNPJ vindo da lista para XX.XXX.XXX/XXXX-XX.
+ *  Recupera zeros à esquerda perdidos quando o Excel gravou o CNPJ como NÚMERO
+ *  (ex.: 00.000.000/0001-91 vira 191 na planilha → volta a 00.000.000/0001-91). */
+export function formatarCNPJ(v?: string): string {
+  let d = onlyDigits(v || "");
+  if (!d) return "";
+  if (d.length < 14) d = d.padStart(14, "0"); // zeros à esquerda que o Excel comeu
+  if (d.length !== 14) return String(v || "").trim();
+  return `${d.slice(0, 2)}.${d.slice(2, 5)}.${d.slice(5, 8)}/${d.slice(8, 12)}-${d.slice(12)}`;
+}
+/** Valida um CNPJ pelos dígitos verificadores (módulo 11). CNPJ real da lista
+ *  passa; número aleatório fabricado em versões antigas quase sempre falha. */
 export function cnpjValido(v: string): boolean {
   const c = onlyDigits(v);
   if (c.length !== 14) return false;
@@ -223,8 +232,9 @@ export function cnpjValido(v: string): boolean {
   const d2 = dv(c.slice(0, 12) + d1);
   return d1 === parseInt(c[12]) && d2 === parseInt(c[13]);
 }
-/** Devolve o CNPJ apenas se for válido; senão string vazia (não engana a equipe). */
-export const cnpjLimpo = (v?: string) => (v && cnpjValido(v) ? v : "");
+/** Normaliza e devolve o CNPJ só se for válido; senão vazio (não engana a equipe
+ *  com número fabricado). Formata e recupera zeros à esquerda antes de validar. */
+export const cnpjLimpo = (v?: string) => { const f = formatarCNPJ(v); return cnpjValido(f) ? f : ""; };
 
 /** Link click-to-call API4COM (protocolo) a partir do número. */
 export function callLink(phone: string): string {
