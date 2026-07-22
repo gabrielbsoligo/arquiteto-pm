@@ -4,7 +4,7 @@ import {
 } from "recharts";
 import {
   Radar, ShoppingCart, LifeBuoy, TrendingUp, Users, DollarSign, Target, CalendarCheck, CheckCircle2,
-  Trophy, AlertTriangle, Clock,
+  Trophy, AlertTriangle, Clock, Send,
 } from "lucide-react";
 import { useAppStore } from "../../store";
 import { computeMetrics, makeDemoData, CANAL_LABEL, PAL, type Metrics, type ClientRef } from "./perfMetrics";
@@ -46,7 +46,7 @@ function rangeOf(p: Periodo): { from: string; to: string } {
 const inRange = (v: string | undefined | null, from: string, to: string) => { const d = (v || "").slice(0, 10); return !!d && d >= from && d <= to; };
 const receitaCanal = (clientsFe: ClientRef[]) => clientsFe.reduce((a, c) => a + (c.valor || 0), 0);
 
-type Tab = "panorama" | "leadbroker" | "recovery";
+type Tab = "panorama" | "outbound" | "leadbroker" | "recovery";
 
 interface Data { members: any[]; leads: Lead[]; deals: Deal[]; reunioes: any[]; ligacoes: any[]; }
 
@@ -108,6 +108,7 @@ const CanaisAnalytics: React.FC<{ data: Data; demo?: boolean }> = ({ data, demo 
 
       <div className="px-6 pb-3 flex items-center gap-1.5">
         <TabBtn active={tab === "panorama"} onClick={() => setTab("panorama")} icon={TrendingUp} label="Panorama" />
+        <TabBtn active={tab === "outbound"} onClick={() => setTab("outbound")} icon={Send} label="Outbound" />
         <TabBtn active={tab === "leadbroker"} onClick={() => setTab("leadbroker")} icon={ShoppingCart} label="LeadBroker" />
         <TabBtn active={tab === "recovery"} onClick={() => setTab("recovery")} icon={LifeBuoy} label="Recovery" />
       </div>
@@ -121,6 +122,7 @@ const CanaisAnalytics: React.FC<{ data: Data; demo?: boolean }> = ({ data, demo 
 
       <div className="px-6 pb-10">
         {tab === "panorama" && <Panorama m={m} />}
+        {tab === "outbound" && <CanalPanel canal="outbound" m={m} bySdr={bySdrForCanal("outbound")} sla={slaCanal("outbound")} />}
         {tab === "leadbroker" && <CanalPanel canal="leadbroker" m={m} bySdr={bySdrForCanal("leadbroker")} sla={slaCanal("leadbroker")} comCusto />}
         {tab === "recovery" && <CanalPanel canal="recovery" m={m} bySdr={bySdrForCanal("recovery")} sla={slaCanal("recovery")} />}
       </div>
