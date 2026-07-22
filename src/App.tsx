@@ -30,6 +30,7 @@ import { LabProspeccaoRoute } from "./components/labs/ProspeccaoHub";
 import { LabHubOutboundRoute } from "./components/labs/HubOutbound";
 import { LabHubDashboardRoute } from "./components/labs/HubDashboard";
 import { LabCanaisRoute } from "./components/labs/CanaisAnalytics";
+import { LabLeadbrokerWatcher, LabLeadbrokerWatcherDemo } from "./components/labs/LeadbrokerWatcher";
 import { LabDisparosRoute } from "./components/labs/DisparosCalc";
 import { LabEmailDisparosRoute } from "./components/labs/EmailDisparos";
 import { RoletaAssignModal } from "./components/RoletaAssignModal";
@@ -285,6 +286,7 @@ const MainApp: React.FC = () => {
   return (
     <Layout currentView={currentView} onViewChange={setCurrentView}>
       {renderView()}
+      <LabLeadbrokerWatcher />
       {roletaLead && (
         <RoletaAssignModal
           lead={roletaLead}
@@ -335,6 +337,16 @@ export default function App() {
         <div className="flex h-screen w-full bg-[var(--color-v4-bg)]">
           <LabHubDashboardRoute />
         </div>
+      </AppProvider>
+    );
+  }
+
+  // Rota de verificação da notificação LeadBroker: ?labs=lbwatch&demo=1
+  if (labsView === 'lbwatch') {
+    return (
+      <AppProvider>
+        <Toaster position="top-right" />
+        <LabLeadbrokerWatcherDemo />
       </AppProvider>
     );
   }
