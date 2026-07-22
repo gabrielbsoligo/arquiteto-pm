@@ -4,31 +4,61 @@ import { ROLE_LABELS } from "../types";
 import { Save, Phone, PhoneOff, Clock, Headphones, Star } from "lucide-react";
 import { supabase } from "../lib/supabase";
 
-// Hover só-leitura: mostra as empresas ao passar o mouse no número (Shows/No-shows/Vendas).
-// Tooltip com position:fixed (não é cortado pelo overflow-hidden da tabela). Não altera dados.
+// Só-leitura: passar o mouse no número (Shows/No-shows/Vendas) espia as empresas;
+// CLICAR fixa a camada (para de seguir o mouse, ganha rolagem e botão de fechar) pra
+// dar pra rolar a lista inteira. Tooltip com position:fixed (não é cortado pela tabela).
+// Não altera dados.
 const HoverEmpresas: React.FC<{ value: number; empresas: string[]; titulo: string; color?: string; bold?: boolean }> = ({ value, empresas, titulo, color, bold }) => {
-  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null); // hover (segue o mouse)
+  const [pin, setPin] = useState<{ x: number; y: number } | null>(null); // fixado no clique
   const tem = empresas && empresas.length > 0;
+  const anchor = pin || pos;
+  const left = anchor ? Math.min(anchor.x + 14, window.innerWidth - 288) : 0;
+  const top = anchor ? Math.min(anchor.y + 14, window.innerHeight - 300) : 0;
+
+  const Lista = (
+    <div className={pin ? "space-y-0.5 max-h-72 overflow-auto pr-1" : "space-y-0.5 max-h-56 overflow-auto"}>
+      {empresas.map((e, i) => <div key={i} className="text-[11px] text-white truncate">• {e}</div>)}
+    </div>
+  );
+
   return (
     <>
       <span
-        onMouseEnter={(e) => tem && setPos({ x: e.clientX, y: e.clientY })}
-        onMouseMove={(e) => tem && setPos({ x: e.clientX, y: e.clientY })}
+        onMouseEnter={(e) => tem && !pin && setPos({ x: e.clientX, y: e.clientY })}
+        onMouseMove={(e) => tem && !pin && setPos({ x: e.clientX, y: e.clientY })}
         onMouseLeave={() => setPos(null)}
-        className={tem ? "cursor-help underline decoration-dotted underline-offset-2" : ""}
+        onClick={(e) => { if (!tem) return; e.stopPropagation(); setPos(null); setPin({ x: e.clientX, y: e.clientY }); }}
+        className={tem ? "cursor-pointer underline decoration-dotted underline-offset-2" : ""}
+        title={tem ? "Clique para fixar e rolar a lista" : undefined}
         style={{ color: color || "#fff", fontWeight: bold ? 700 : undefined }}
       >
         {value}
       </span>
-      {pos && tem && (
-        <div style={{ position: "fixed", left: Math.min(pos.x + 14, window.innerWidth - 260), top: pos.y + 14, zIndex: 70 }}
-          className="pointer-events-none w-60 rounded-lg border border-[var(--color-v4-border)] bg-[var(--color-v4-card)] shadow-2xl p-2.5">
-          <div className="text-[10px] uppercase tracking-wide text-[var(--color-v4-text-muted)] mb-1">{titulo} · {empresas.length}</div>
-          <div className="space-y-0.5 max-h-56 overflow-auto">
-            {empresas.slice(0, 25).map((e, i) => <div key={i} className="text-[11px] text-white truncate">• {e}</div>)}
-            {empresas.length > 25 && <div className="text-[10px] text-[var(--color-v4-text-muted)]">+{empresas.length - 25} outras…</div>}
-          </div>
+
+      {/* peek no hover (não fixado) */}
+      {pos && !pin && tem && (
+        <div style={{ position: "fixed", left, top, zIndex: 70 }}
+          className="pointer-events-none w-72 rounded-lg border border-[var(--color-v4-border)] bg-[var(--color-v4-card)] shadow-2xl p-2.5">
+          <div className="text-[10px] uppercase tracking-wide text-[var(--color-v4-text-muted)] mb-1">{titulo} · {empresas.length} <span className="text-[9px] normal-case">(clique p/ fixar)</span></div>
+          {Lista}
         </div>
+      )}
+
+      {/* fixado no clique: backdrop pra fechar + camada rolável */}
+      {pin && tem && (
+        <>
+          <div onClick={() => setPin(null)} style={{ position: "fixed", inset: 0, zIndex: 69 }} />
+          <div style={{ position: "fixed", left, top, zIndex: 71 }}
+            onClick={(e) => e.stopPropagation()}
+            className="w-72 rounded-lg border border-[var(--color-v4-border)] bg-[var(--color-v4-card)] shadow-2xl p-2.5">
+            <div className="flex items-center gap-2 mb-1.5">
+              <span className="text-[10px] uppercase tracking-wide text-[var(--color-v4-text-muted)] flex-1">{titulo} · {empresas.length}</span>
+              <button onClick={() => setPin(null)} className="text-[var(--color-v4-text-muted)] hover:text-white leading-none text-sm px-1" title="Fechar">✕</button>
+            </div>
+            {Lista}
+          </div>
+        </>
       )}
     </>
   );
