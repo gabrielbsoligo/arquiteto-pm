@@ -28,6 +28,7 @@ import { TVMode } from "./components/TVMode";
 import { LabPerfSdrRoute } from "./components/labs/PerfSdrDashboard";
 import { LabProspeccaoRoute } from "./components/labs/ProspeccaoHub";
 import { LabHubOutboundRoute } from "./components/labs/HubOutbound";
+import { LabHubDashboardRoute } from "./components/labs/HubDashboard";
 import { LabDisparosRoute } from "./components/labs/DisparosCalc";
 import { LabEmailDisparosRoute } from "./components/labs/EmailDisparos";
 import { RoletaAssignModal } from "./components/RoletaAssignModal";
@@ -268,6 +269,7 @@ const MainApp: React.FC = () => {
       case "perf_sdr": return <PerfSdrView />;
       case "perf_visual": return <LabPerfSdrRoute />;
       case "prospeccao": return <LabProspeccaoRoute />;
+      case "hub_dashboard": return <LabHubDashboardRoute />;
       case "hub_outbound": return <LabHubOutboundRoute />;
       case "disparos": return <LabDisparosRoute />;
       case "email_disparos": return <LabEmailDisparosRoute />;
@@ -318,6 +320,18 @@ export default function App() {
         <Toaster position="top-right" />
         <div className="flex h-screen w-full bg-[var(--color-v4-bg)]">
           <LabProspeccaoRoute />
+        </div>
+      </AppProvider>
+    );
+  }
+
+  // Rota standalone do Dashboard do Hub Outbound
+  if (labsView === 'hub_dashboard') {
+    return (
+      <AppProvider>
+        <Toaster position="top-right" />
+        <div className="flex h-screen w-full bg-[var(--color-v4-bg)]">
+          <LabHubDashboardRoute />
         </div>
       </AppProvider>
     );
