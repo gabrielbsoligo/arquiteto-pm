@@ -26,10 +26,10 @@ const SURFACE = "var(--color-v4-surface)";
 const brl = (n: number) => "R$ " + (n || 0).toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 const pct = (a: number, b: number) => (b > 0 ? Math.round((100 * a) / b) : 0);
 
-type Periodo = "all" | "7d" | "30d" | "90d" | "mes" | "ano";
+type Periodo = "all" | "7d" | "30d" | "90d" | "mes" | "ano" | "custom";
 const PERIODOS: { id: Periodo; label: string }[] = [
   { id: "all", label: "Todo período" }, { id: "7d", label: "Últimos 7 dias" }, { id: "30d", label: "Últimos 30 dias" },
-  { id: "90d", label: "Últimos 90 dias" }, { id: "mes", label: "Este mês" }, { id: "ano", label: "Este ano" },
+  { id: "90d", label: "Últimos 90 dias" }, { id: "mes", label: "Este mês" }, { id: "ano", label: "Este ano" }, { id: "custom", label: "Personalizado…" },
 ];
 function rangeOf(p: Periodo): { from: string; to: string } {
   const to = new Date(); const toStr = to.toISOString().slice(0, 10);
@@ -53,7 +53,11 @@ interface Data { members: any[]; leads: Lead[]; deals: Deal[]; reunioes: any[]; 
 const CanaisAnalytics: React.FC<{ data: Data; demo?: boolean }> = ({ data, demo }) => {
   const [tab, setTab] = useState<Tab>("panorama");
   const [periodo, setPeriodo] = useState<Periodo>("all");
-  const { from, to } = useMemo(() => rangeOf(periodo), [periodo]);
+  const [cFrom, setCFrom] = useState<string>("");
+  const [cTo, setCTo] = useState<string>("");
+  const { from, to } = useMemo(() => periodo === "custom"
+    ? { from: cFrom || "2000-01-01", to: cTo || "2999-12-31" }
+    : rangeOf(periodo), [periodo, cFrom, cTo]);
 
   const m: Metrics = useMemo(() => computeMetrics(data, { from, to, sdrIds: null }), [data, from, to]);
   const hasData = data.leads.length > 0 || data.reunioes.length > 0 || data.deals.length > 0;
@@ -104,6 +108,15 @@ const CanaisAnalytics: React.FC<{ data: Data; demo?: boolean }> = ({ data, demo 
           className="text-xs rounded-lg px-3 py-2 border border-[var(--color-v4-border)] bg-[var(--color-v4-card)] text-white">
           {PERIODOS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
         </select>
+        {periodo === "custom" && (
+          <div className="flex items-center gap-1.5">
+            <input type="date" value={cFrom} max={cTo || undefined} onChange={(e) => setCFrom(e.target.value)}
+              className="text-xs rounded-lg px-2.5 py-2 border border-[var(--color-v4-border)] bg-[var(--color-v4-card)] text-white" title="De" />
+            <span className="text-[11px]" style={{ color: MUTED }}>até</span>
+            <input type="date" value={cTo} min={cFrom || undefined} onChange={(e) => setCTo(e.target.value)}
+              className="text-xs rounded-lg px-2.5 py-2 border border-[var(--color-v4-border)] bg-[var(--color-v4-card)] text-white" title="Até" />
+          </div>
+        )}
       </div>
 
       <div className="px-6 pb-3 flex items-center gap-1.5">
