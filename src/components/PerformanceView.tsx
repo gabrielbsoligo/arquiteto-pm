@@ -4,6 +4,36 @@ import { ROLE_LABELS } from "../types";
 import { Save, Phone, PhoneOff, Clock, Headphones, Star } from "lucide-react";
 import { supabase } from "../lib/supabase";
 
+// Hover só-leitura: mostra as empresas ao passar o mouse no número (Shows/No-shows/Vendas).
+// Tooltip com position:fixed (não é cortado pelo overflow-hidden da tabela). Não altera dados.
+const HoverEmpresas: React.FC<{ value: number; empresas: string[]; titulo: string; color?: string; bold?: boolean }> = ({ value, empresas, titulo, color, bold }) => {
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+  const tem = empresas && empresas.length > 0;
+  return (
+    <>
+      <span
+        onMouseEnter={(e) => tem && setPos({ x: e.clientX, y: e.clientY })}
+        onMouseMove={(e) => tem && setPos({ x: e.clientX, y: e.clientY })}
+        onMouseLeave={() => setPos(null)}
+        className={tem ? "cursor-help underline decoration-dotted underline-offset-2" : ""}
+        style={{ color: color || "#fff", fontWeight: bold ? 700 : undefined }}
+      >
+        {value}
+      </span>
+      {pos && tem && (
+        <div style={{ position: "fixed", left: Math.min(pos.x + 14, window.innerWidth - 260), top: pos.y + 14, zIndex: 70 }}
+          className="pointer-events-none w-60 rounded-lg border border-[var(--color-v4-border)] bg-[var(--color-v4-card)] shadow-2xl p-2.5">
+          <div className="text-[10px] uppercase tracking-wide text-[var(--color-v4-text-muted)] mb-1">{titulo} · {empresas.length}</div>
+          <div className="space-y-0.5 max-h-56 overflow-auto">
+            {empresas.slice(0, 25).map((e, i) => <div key={i} className="text-[11px] text-white truncate">• {e}</div>)}
+            {empresas.length > 25 && <div className="text-[10px] text-[var(--color-v4-text-muted)]">+{empresas.length - 25} outras…</div>}
+          </div>
+        </div>
+      )}
+    </>
+  );
+};
+
 export const PerformanceView: React.FC = () => {
   const { members, performanceSdr, savePerformanceSdr, performanceCloser, savePerformanceCloser, ligacoes, deals, reunioes } = useAppStore();
   const [recomendacoes, setRecomendacoes] = useState<any[]>([]);
@@ -261,6 +291,11 @@ export const PerformanceView: React.FC = () => {
           const perdidos = closerDeals.filter(d => d.status === 'perdido').length;
           const totalDeals = closerDeals.length;
 
+          // empresas por métrica (para o hover) — só leitura, não altera nada
+          const showsEmp = closerReunioes.filter(r => r.show).map(r => (r as any).empresa || '—');
+          const noShowsEmp = closerReunioes.filter(r => !r.show).map(r => (r as any).empresa || '—');
+          const vendasEmp = closerDeals.filter(d => d.status === 'contrato_assinado').map(d => (d as any).empresa || '—');
+
           const mrr = closerDeals.filter(d => d.status === 'contrato_assinado').reduce((a, d) => a + (d.valor_recorrente || d.valor_mrr || 0), 0);
           const ot = closerDeals.filter(d => d.status === 'contrato_assinado').reduce((a, d) => a + (d.valor_escopo || d.valor_ot || 0), 0);
           const ticketMedio = vendas > 0 ? (mrr + ot) / vendas : 0;
@@ -273,7 +308,7 @@ export const PerformanceView: React.FC = () => {
 
           const closerRecs = recomendacoes.filter(r => r.closer_id === closer.id && r.created_at >= cStart.toISOString() && r.created_at <= cEnd.toISOString());
 
-          return { closer, shows, noShows, vendas, perdidos, totalDeals, mrr, ot, ticketMedio, txConversao, tempoCiclo, recsColetadas: closerRecs.length };
+          return { closer, shows, noShows, vendas, perdidos, totalDeals, mrr, ot, ticketMedio, txConversao, tempoCiclo, recsColetadas: closerRecs.length, showsEmp, noShowsEmp, vendasEmp };
         });
 
         const fmt = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 0 }).format(v);
@@ -302,12 +337,12 @@ export const PerformanceView: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {closerStats.map(({ closer, shows, noShows, vendas, txConversao, mrr, ot, ticketMedio, tempoCiclo, recsColetadas }) => (
+                  {closerStats.map(({ closer, shows, noShows, vendas, txConversao, mrr, ot, ticketMedio, tempoCiclo, recsColetadas, showsEmp, noShowsEmp, vendasEmp }) => (
                     <tr key={closer.id} className="border-t border-[var(--color-v4-border)]">
                       <td className="px-4 py-3 text-white font-medium">{closer.name.split(' ')[0]}</td>
-                      <td className="px-4 py-3 text-green-400">{shows}</td>
-                      <td className="px-4 py-3 text-red-400">{noShows}</td>
-                      <td className="px-4 py-3 text-white font-bold">{vendas}</td>
+                      <td className="px-4 py-3"><HoverEmpresas value={shows} color="#4ade80" empresas={showsEmp} titulo={`Shows · ${closer.name.split(' ')[0]}`} /></td>
+                      <td className="px-4 py-3"><HoverEmpresas value={noShows} color="#f87171" empresas={noShowsEmp} titulo={`No-shows · ${closer.name.split(' ')[0]}`} /></td>
+                      <td className="px-4 py-3"><HoverEmpresas value={vendas} color="#ffffff" bold empresas={vendasEmp} titulo={`Vendas · ${closer.name.split(' ')[0]}`} /></td>
                       <td className="px-4 py-3 text-white">{txConversao.toFixed(0)}%</td>
                       <td className="px-4 py-3 text-white">{fmt(mrr)}</td>
                       <td className="px-4 py-3 text-white">{fmt(ot)}</td>
