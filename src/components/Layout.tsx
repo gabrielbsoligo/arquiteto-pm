@@ -27,6 +27,7 @@ import {
   LayoutGrid,
   Send,
   Mail,
+  Radar,
 } from "lucide-react";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
@@ -36,7 +37,7 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export type View = "pipeline" | "leads" | "reunioes" | "agendas_time" | "performance" | "metas" | "comissoes" | "contratos" | "equipe" | "dashboard" | "blackbox" | "leadbroker" | "auditoria" | "prepcall" | "3c_manual" | "roleta_historico" | "playbook" | "perf_sdr" | "perf_visual" | "call_quality" | "geral" | "prospeccao" | "hub_dashboard" | "hub_outbound" | "disparos" | "email_disparos";
+export type View = "pipeline" | "leads" | "reunioes" | "agendas_time" | "performance" | "metas" | "comissoes" | "contratos" | "equipe" | "dashboard" | "blackbox" | "leadbroker" | "auditoria" | "prepcall" | "3c_manual" | "roleta_historico" | "playbook" | "perf_sdr" | "perf_visual" | "call_quality" | "geral" | "prospeccao" | "hub_dashboard" | "hub_outbound" | "canais" | "disparos" | "email_disparos";
 
 export const Layout: React.FC<{
   children: ReactNode;
@@ -56,6 +57,7 @@ export const Layout: React.FC<{
     { id: "prospeccao" as const, label: "Prospecção", icon: Rocket, badge: "novo" },
     { id: "hub_dashboard" as const, label: "Dashboard Outbound", icon: LayoutDashboard, badge: "novo" },
     { id: "hub_outbound" as const, label: "Hub Outbound", icon: LayoutGrid, badge: "novo" },
+    { id: "canais" as const, label: "Análise de Canais", icon: Radar, badge: "novo" },
     { id: "perf_sdr" as const, label: "Perf. SDR", icon: UserRoundCheck, allowedRoles: ['gestor'] as TeamRole[] },
     { id: "perf_visual" as const, label: "Perf. SDR Visual", icon: Gauge, badge: "novo", allowedRoles: ['gestor', 'sdr', 'closer'] as TeamRole[] },
     { id: "disparos" as const, label: "Disparos WhatsApp", icon: Send, badge: "novo" },

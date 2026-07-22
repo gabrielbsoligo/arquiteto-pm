@@ -29,6 +29,7 @@ import { LabPerfSdrRoute } from "./components/labs/PerfSdrDashboard";
 import { LabProspeccaoRoute } from "./components/labs/ProspeccaoHub";
 import { LabHubOutboundRoute } from "./components/labs/HubOutbound";
 import { LabHubDashboardRoute } from "./components/labs/HubDashboard";
+import { LabCanaisRoute } from "./components/labs/CanaisAnalytics";
 import { LabDisparosRoute } from "./components/labs/DisparosCalc";
 import { LabEmailDisparosRoute } from "./components/labs/EmailDisparos";
 import { RoletaAssignModal } from "./components/RoletaAssignModal";
@@ -271,6 +272,7 @@ const MainApp: React.FC = () => {
       case "prospeccao": return <LabProspeccaoRoute />;
       case "hub_dashboard": return <LabHubDashboardRoute />;
       case "hub_outbound": return <LabHubOutboundRoute />;
+      case "canais": return <LabCanaisRoute />;
       case "disparos": return <LabDisparosRoute />;
       case "email_disparos": return <LabEmailDisparosRoute />;
       case "call_quality": return <CallQualityView />;
@@ -332,6 +334,18 @@ export default function App() {
         <Toaster position="top-right" />
         <div className="flex h-screen w-full bg-[var(--color-v4-bg)]">
           <LabHubDashboardRoute />
+        </div>
+      </AppProvider>
+    );
+  }
+
+  // Rota standalone da Análise de Canais (dados reais; ?labs=canais&demo=1 pra ver com mock)
+  if (labsView === 'canais') {
+    return (
+      <AppProvider>
+        <Toaster position="top-right" />
+        <div className="flex h-screen w-full bg-[var(--color-v4-bg)]">
+          <LabCanaisRoute demo={params.get('demo') === '1'} />
         </div>
       </AppProvider>
     );

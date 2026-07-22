@@ -315,7 +315,7 @@ export function makeDemoData() {
     id: `cl${i}`, name: n, email: `${n.toLowerCase()}@ruston.com`, role: "closer", active: true, created_at: "2025-01-01",
   }));
   members.push(...closers);
-  const canais = ["leadbroker", "blackbox", "outbound", "recomendacao", "indicacao"];
+  const canais = ["leadbroker", "blackbox", "outbound", "recovery", "recomendacao", "indicacao"];
   const empresas = ["Alfa Ltda", "Beta SA", "Gamma Corp", "Delta ME", "Epsilon Tech", "Zeta Foods", "Eta Log", "Theta Farma", "Iota Auto", "Kappa Bank", "Lambda Wear", "Mu Solar", "Nu Games", "Xi Health", "Omicron Edu", "Pi Retail", "Rho Build", "Sigma Med", "Tau Cloud", "Upsilon Agro"];
   const today = new Date();
   const dstr = (daysAgo: number) => {
